@@ -243,7 +243,7 @@ export function summarizeManifest(root) {
       const hasFilter = child.children.some((c) => c.tag === 'intent-filter');
       let exported = child.attrs.exported;
       if (exported === undefined) exported = child.tag === 'provider' ? (targetSdk !== null && targetSdk < 17) : hasFilter;
-      components.push({ type: child.tag, name, exported: exported === true || exported === 'true', hasIntentFilter: hasFilter });
+      components.push({ type: child.tag, name, exported: exported === true || exported === 'true', hasIntentFilter: hasFilter, permission: child.attrs.permission ? String(child.attrs.permission) : null });
     } else if (child.tag === 'meta-data') {
       metaData.push({ name: String(child.attrs.name ?? ''), value: child.attrs.value ?? child.attrs.resource ?? '' });
     }

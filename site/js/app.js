@@ -3,7 +3,7 @@ import { fileSource } from './zip.js';
 import { sha256Hex } from './cert.js';
 import { TERMS, TERMS_VERSION, t } from './i18n.js';
 import { checkPolicy } from './policy.js';
-import { buildNotes, LIMITATIONS } from './notes.js';
+import { buildRisks, LIMITATIONS, CONTEXT_CATEGORIES } from './risks.js';
 
 const MAX_HASH_BYTES = 512 * 1024 * 1024;
 const $ = (id) => document.getElementById(id);
@@ -19,7 +19,7 @@ const state = {
   consent: null,
   fileSha256: null,
   result: null,
-  context: { category: 'game', childDirected: false },
+  context: { category: 'other', childDirected: false },
   policyText: '',
   policy: null,
   tab: 'sdks',
@@ -29,7 +29,11 @@ const state = {
 
 const L = (key, vars) => t(state.lang, key, vars);
 const pick = (obj) => (obj ? obj[state.lang] ?? obj.en : '');
-const isIos = () => state.result?.platform === 'ios';
+const isIos = () => Boolean(state.result?.ios); // iOS and macOS app bundles
+const PLATFORM_LABELS = {
+  android: 'Android', ios: 'iOS', macos: 'macOS', windows: 'Windows', linux: 'Linux', harmonyos: 'HarmonyOS',
+  'browser-extension': 'Browser extension', miniprogram: 'WeChat mini-program', electron: 'Electron', archive: 'Archive', unknown: 'Unknown',
+};
 
 // Knowledge-base indicator texts are stored in English; translate the known patterns for ZH.
 const CN_PATTERNS = [
@@ -170,7 +174,7 @@ async function runAnalysis() {
       state.fileSha256 = await sha256Hex(new Uint8Array(await state.file.arrayBuffer()));
     }
     state.result = await analyzeSource(fileSource(state.file), state.kb, { onProgress: setProgress });
-    state.tab = 'sdks';
+    state.tab = 'risks';
     state.showAllEndpoints = false;
     renderResults();
     show('results');
@@ -196,32 +200,33 @@ function stats(r) {
 }
 
 function tabs() {
-  const r = state.result;
-  const list = ['sdks', 'permissions', 'endpoints'];
+  const list = ['risks', 'sdks', 'permissions', 'endpoints'];
   if (isIos()) list.push('declared');
-  list.push('details', 'policy', 'notes', 'export');
-  return list.filter((x) => x !== 'declared' || r.ios);
+  list.push('details', 'policy', 'export');
+  return list;
 }
 
 function tabCount(tab) {
   const r = state.result;
   return {
     sdks: r.sdks.length, permissions: r.permissions.length, endpoints: r.endpoints.length,
-    declared: r.ios ? r.ios.declaredData.length : undefined, notes: currentNotes().length,
+    declared: r.ios ? r.ios.declaredData.length : undefined, risks: currentRisks().filter((a) => a.status === 'signals').length,
   }[tab];
 }
 
-function currentNotes() {
-  return buildNotes(state.result, state.context, state.policy);
+function currentRisks() {
+  return buildRisks(state.result, state.context, state.policy);
 }
 
 function renderResults() {
   const r = state.result;
-  const platform = r.platform === 'ios' ? `iOS · ${r.container.toUpperCase()}` : `Android · ${r.container.toUpperCase()}`;
-  $('r-title').innerHTML = `<span class="platform">${esc(platform)}</span>${r.app.name ? `${esc(r.app.name)} ` : ''}<span class="${r.app.name ? 'muted' : ''}">${esc(r.app.id)}</span> <span class="muted">${esc(r.app.versionName ?? '')}${r.app.versionCode != null ? ` (${esc(r.app.versionCode)})` : ''}</span>`;
-  const minLine = r.platform === 'ios'
-    ? L('minIos', { min: r.app.minSdk ?? '?', target: r.app.targetSdk ?? '?' })
-    : L('minTarget', { min: r.app.minSdk ?? '?', target: r.app.targetSdk ?? '?' });
+  const platform = `${PLATFORM_LABELS[r.platform] ?? r.platform} · ${String(r.container).toUpperCase()}`;
+  const id = r.app.id ?? state.file.name;
+  $('r-title').innerHTML = `<span class="platform">${esc(platform)}</span>${r.app.name && r.app.name !== id ? `${esc(r.app.name)} ` : ''}<span class="${r.app.name && r.app.name !== id ? 'muted' : ''}">${esc(id)}</span> <span class="muted">${esc(r.app.versionName ?? '')}${r.app.versionCode != null ? ` (${esc(r.app.versionCode)})` : ''}</span>`;
+  const minLine = r.platform === 'android'
+    ? L('minTarget', { min: r.app.minSdk ?? '?', target: r.app.targetSdk ?? '?' })
+    : r.ios ? L('minIos', { min: r.app.minSdk ?? '?', target: r.app.targetSdk ?? '?' })
+      : r.app.publisher ? `${L('publisher')}: ${r.app.publisher}` : '';
   $('r-meta').innerHTML = `${esc(state.file.name)} · ${esc(fmtBytes(state.file.size))} · ${esc(minLine)}<br>
     ${esc(L('fileHash'))}: <code>${esc(state.fileSha256 ?? L('notComputed'))}</code><br>
     ${esc(L('analyzedIn', { s: (r.durationMs / 1000).toFixed(1), v: ANALYZER_VERSION, kb: r.analyzer.kbVersion }))}`;
@@ -237,8 +242,8 @@ function renderResults() {
 
 function renderPanel() {
   const fn = {
-    sdks: panelSdks, permissions: panelPermissions, endpoints: panelEndpoints, declared: panelDeclared,
-    details: panelDetails, policy: panelPolicy, notes: panelNotes, export: panelExport,
+    risks: panelRisks, sdks: panelSdks, permissions: panelPermissions, endpoints: panelEndpoints, declared: panelDeclared,
+    details: panelDetails, policy: panelPolicy, export: panelExport,
   }[state.tab];
   $('r-panel').innerHTML = fn();
   bindPanel();
@@ -254,7 +259,9 @@ function evidenceLine(e) {
 }
 
 function encryptedBanner() {
-  return isIos() && state.result.ios.binary?.encrypted ? `<div class="banner">${esc(L('encryptedBanner'))}</div>` : '';
+  const r = state.result;
+  const enc = isIos() && r.ios.binary?.encrypted ? `<div class="banner">${esc(L('encryptedBanner'))}</div>` : '';
+  return enc + (r.limits ?? []).map((l) => `<div class="banner">${esc(pick(l))}</div>`).join('');
 }
 
 function sdkTable(sdks) {
@@ -284,11 +291,12 @@ function panelPermissions() {
   const r = state.result;
   const cats = state.kb.permissions.categories;
   const order = { high: 0, medium: 1, low: 2 };
-  if (isIos()) {
+  if (r.platform !== 'android') {
+    if (!r.permissions.length) return `<p class="muted">${esc(L('noPermissions'))}</p>`;
     const rows = [...r.permissions].sort((a, b) => (order[a.level] ?? 3) - (order[b.level] ?? 3));
-    return `<p class="note-line">${esc(L('iosPermNote'))}</p>
+    return `<p class="note-line">${esc(L(isIos() ? 'iosPermNote' : r.platform === 'windows' ? 'winPermNote' : 'genericPermNote'))}</p>
       <div class="table-wrap"><table>
-      <thead><tr><th>${esc(L('colIosKey'))}</th><th>${esc(L('colDataCategory'))}</th><th>${esc(L('colLevel'))}</th><th>${esc(L('colExplanation'))}</th></tr></thead>
+      <thead><tr><th>${esc(L(isIos() ? 'colIosKey' : 'colPermission'))}</th><th>${esc(L('colDataCategory'))}</th><th>${esc(L('colLevel'))}</th><th>${esc(L(isIos() ? 'colExplanation' : 'colNote'))}</th></tr></thead>
       <tbody>${rows.map((p) => `<tr><td><code>${esc(p.name)}</code></td><td>${esc(pick(cats[p.category]))}</td><td>${levelPill(p.level)}</td><td>${p.kind === 'usage' ? `“${esc(p.description)}”` : `<span class="sub">${esc(p.description)}</span>`}</td></tr>`).join('')}</tbody></table></div>`;
   }
   const sensitive = r.permissions.filter((p) => p.level).sort((a, b) => order[a.level] - order[b.level]);
@@ -423,8 +431,30 @@ function panelDetailsIos() {
   </div>`;
 }
 
+function genericSections(details) {
+  return details.map((d) => `<div class="card"><h3>${esc(pick(d.title))}</h3>
+    ${d.rows?.length ? `<dl class="kv">${d.rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>` : ''}
+    ${(d.lists ?? []).filter((l) => l.items?.length).map((l) => `<h4 class="muted small" style="margin:12px 0 6px">${esc(l.title)} (${l.items.length})</h4>
+      <ul class="list-plain">${l.items.slice(0, 200).map((x) => `<li><code>${esc(x)}</code></li>`).join('')}</ul>`).join('')}
+  </div>`).join('');
+}
+
+function secretsCard() {
+  const s = state.result.secrets ?? [];
+  if (!s.length) return '';
+  return `<div class="card"><h3>${esc(L('secretsTitle'))}</h3><p class="muted small">${esc(L('secretsNote'))}</p>
+    <div class="table-wrap"><table><thead><tr><th>${esc(L('colSecret'))}</th><th>${esc(L('colValue'))}</th><th>${esc(L('colFoundIn'))}</th></tr></thead><tbody>
+    ${s.map((x) => `<tr><td>${esc(x.label)} ${levelPill(x.level)}</td><td><code>${esc(x.value)}</code></td><td class="sub">${x.sources.map(esc).join('<br>')}</td></tr>`).join('')}
+    </tbody></table></div></div>`;
+}
+
 function panelDetails() {
-  return isIos() ? panelDetailsIos() : panelDetailsAndroid();
+  const r = state.result;
+  let main;
+  if (r.platform === 'android') main = panelDetailsAndroid();
+  else if (r.ios) main = panelDetailsIos();
+  else main = `${encryptedBanner()}<div class="grid-2">${certCard()}<div class="card"><h3>${esc(L('packagesTitle'))}</h3>${listOrDash(r.npmPackages?.slice(0, 300))}</div></div>`;
+  return `${main}${secretsCard()}${genericSections(r.details ?? [])}`;
 }
 
 function matchCell(m) {
@@ -453,28 +483,33 @@ function panelPolicy() {
     ${state.policy ? policyResultsHtml(state.policy) : ''}`;
 }
 
-function notesHtml(notes) {
-  return notes.map((n) => `<article class="note">
-      <h4>${esc(L('observation'))}</h4><p>${esc(pick(n.observation))}</p>
-      <h4>${esc(L('whyMatters'))}</h4><p>${esc(pick(n.why))}</p>
-      ${n.citation ? `<p class="cite">${esc(n.citation)}</p>` : ''}
-    </article>`).join('');
-}
-
 function limitationsHtml() {
   return `<h3 style="margin-top:22px">${esc(L('limitationsTitle'))}</h3>
     <ul class="list-plain">${LIMITATIONS[state.lang].map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`;
 }
 
-function panelNotes() {
-  const notes = currentNotes();
-  const cats = ['game', 'video', 'ai', 'utility', 'ecommerce', 'other'];
+const STATUS_PILL = { signals: 'warn', context: '', none: 'ok' };
+
+function risksHtml(areas) {
+  return areas.map((a) => `<article class="note risk-${a.status}">
+      <div class="risk-head"><h3>${esc(pick(a.title))}</h3><span class="pill ${STATUS_PILL[a.status]}">${esc(L(`status_${a.status}`))}</span></div>
+      ${a.signals.length ? `<h4>${esc(L('observation'))}</h4><ul class="list-plain">${a.signals.map((s) => `<li>${esc(pick(s))}</li>`).join('')}</ul>` : `<p class="muted small">${esc(L(a.status === 'context' ? 'riskNeedsContext' : 'riskNone'))}</p>`}
+      <h4>${esc(L('whyMatters'))}</h4><p>${esc(pick(a.why))}</p>
+      <h4>${esc(L('verifyNext'))}</h4><p>${esc(pick(a.next))}</p>
+      <p class="cite">${a.refs.map(([label, url]) => `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`).join(' · ')}</p>
+    </article>`).join('');
+}
+
+function panelRisks() {
+  const areas = currentRisks();
+  const n = areas.filter((a) => a.status === 'signals').length;
   return `<div class="banner">${esc(L('notesBanner'))}</div>
     <div class="card"><h3>${esc(L('contextTitle'))}</h3><div class="context">
-      <label>${esc(L('category'))} <select id="ctx-category">${cats.map((c) => `<option value="${c}" ${state.context.category === c ? 'selected' : ''}>${esc(L(`cat_${c}`))}</option>`).join('')}</select></label>
+      <label>${esc(L('category'))} <select id="ctx-category">${CONTEXT_CATEGORIES.map((c) => `<option value="${c}" ${state.context.category === c ? 'selected' : ''}>${esc(L(`cat_${c}`))}</option>`).join('')}</select></label>
       <label><input type="checkbox" id="ctx-child" ${state.context.childDirected ? 'checked' : ''}> ${esc(L('childDirected'))}</label>
     </div></div>
-    ${notes.length ? notesHtml(notes) : `<p class="muted">${esc(L('noNotes'))}</p>`}
+    <p class="note-line">${esc(L('riskSummary', { n, total: areas.length }))}</p>
+    ${risksHtml(areas)}
     ${limitationsHtml()}`;
 }
 
@@ -521,7 +556,7 @@ function reportObject() {
     appContext: state.context,
     result: state.result,
     policyCheck: state.policy,
-    notes: { status: 'draft_not_expert_reviewed', items: currentNotes() },
+    riskAreas: { status: 'draft_not_expert_reviewed', context: state.context, items: currentRisks() },
     limitations: LIMITATIONS,
   };
 }
@@ -556,7 +591,7 @@ function printReport() {
     <p><strong>${esc(L('disclaimer'))}</strong></p>
     <div class="stats">${$('r-stats').innerHTML}</div>
     ${sections.map(([k, html]) => `<section><h2>${esc(L(k))}</h2>${html}</section>`).join('')}
-    <section><h2>${esc(L('tab_notes'))}</h2><div class="banner">${esc(L('notesBanner'))}</div>${notesHtml(currentNotes())}${limitationsHtml()}</section>
+    <section><h2>${esc(L('tab_risks'))}</h2><div class="banner">${esc(L('notesBanner'))}</div>${risksHtml(currentRisks())}${limitationsHtml()}</section>
     <section><h2>${esc(L('consentRecord'))}</h2>${consentRecordHtml()}</section>`;
   window.print();
 }

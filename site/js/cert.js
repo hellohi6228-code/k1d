@@ -90,6 +90,34 @@ export function certsFromPkcs7(buf) {
   return [];
 }
 
+// The signer's own certificate: matched by the issuer serial number in the first SignerInfo.
+// (Authenticode blobs also carry timestamp and intermediate certificates.)
+export function signerCertFromPkcs7(buf) {
+  try {
+    const ci = readTLV(buf, 0);
+    const [, explicit] = children(buf, ci);
+    const signedData = children(buf, explicit)[0];
+    const parts = children(buf, signedData);
+    const certSet = parts.find((c) => c.tag === 0xa0);
+    const signerInfos = parts[parts.length - 1];
+    if (!certSet || signerInfos.tag !== 0x31) return leafCertFromCms(buf);
+    const si = children(buf, signerInfos)[0];
+    const sid = children(buf, si)[1]; // issuerAndSerialNumber
+    const serial = children(buf, sid)[1];
+    const want = Array.from(buf.subarray(serial.contentStart, serial.end), (b) => b.toString(16).padStart(2, '0')).join('');
+    for (const c of children(buf, certSet)) {
+      const der = buf.slice(c.start, c.end);
+      if (describeCert(der)?.serialHex === want) return der;
+    }
+  } catch { /* fall through */ }
+  return leafCertFromCms(buf);
+}
+
+export async function sha1Hex(bytes) {
+  const h = await crypto.subtle.digest('SHA-1', bytes);
+  return Array.from(new Uint8Array(h), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 // v1: PKCS#7 SignedData in META-INF/*.RSA|DSA|EC -> first certificate DER.
 export function certFromPkcs7(buf) {
   return certsFromPkcs7(buf)[0] ?? null;

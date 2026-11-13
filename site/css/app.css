@@ -188,3 +188,11 @@ textarea.policy { width: 100%; min-height: 200px; resize: vertical; }
   th, td { padding: 4px 6px; }
   .table-wrap { overflow: visible; border: 0; }
 }
+
+.risk-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.risk-head h3 { margin: 0; font-size: 1.02rem; }
+.note.risk-signals { border-left: 4px solid var(--warn); }
+.note.risk-context { border-left: 4px solid var(--border); }
+.note.risk-none { border-left: 4px solid var(--ok); }
+.note h4 { margin-top: 12px; }
+.note .cite a { color: var(--accent); }

@@ -1,0 +1,19 @@
+{
+  "note": "Ground truth for tests/formats.test.mjs; signer certificate fingerprint from openssl.",
+  "signerSha256": "d183d32b8b287f5145ff6050f6a82e0d451908e8760aba5bb962d595f9e795cf",
+  "exe": {
+    "versionStrings": {
+      "CompanyName": "k1d Demo Studio",
+      "ProductName": "Idle Quest",
+      "FileDescription": "Idle Quest Launcher",
+      "FileVersion": "1.4.2.0",
+      "OriginalFilename": "IdleQuest.exe",
+      "InternalName": "IdleQuest"
+    },
+    "imports": [
+      "IPHLPAPI.DLL",
+      "USER32.dll",
+      "steam_api64.dll"
+    ]
+  }
+}

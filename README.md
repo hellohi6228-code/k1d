@@ -2,34 +2,52 @@
 
 **Live:** https://hellohi6228-code.github.io/k1d/
 
-k1d reads a mobile app file **in your browser** and shows what's inside it. Anyone can use it on an app they obtained lawfully: an app on their own phone, or an app their company publishes. Use it to check whether an app you rely on embeds trackers or connects to servers you wouldn't expect. The file is never uploaded, and there is no server.
+k1d reads an app or installer **in your browser** and shows what's inside it. It maps what it finds to the US legal areas where China-linked apps have faced lawsuits and enforcement. Anyone can use it on a file they obtained lawfully: an app on their own device, or one their company publishes. The file is never uploaded, and there is no server.
+
+## Supported formats (detected by content, not file extension)
 
 | Platform | Formats |
 |---|---|
-| Android | `.apk`, `.aab` (App Bundle), `.xapk`, `.apks`, `.apkm` (split bundles) |
+| Android | `.apk`, `.aab`, `.xapk`, `.apks`, `.apkm` |
 | iOS | `.ipa` |
+| macOS | `.app` in a `.zip`, `.pkg` (metadata, scripts, signer), bare Mach-O; `.dmg` is recognized and you're asked to zip the `.app` |
+| Windows | `.exe` / `.dll` / `.sys` (PE: version info, imports, manifest, Authenticode signer, embedded installer payloads), `.msi`, `.msix` / `.appx` / bundles |
+| Linux | ELF binaries, `.deb` (gzip), `.rpm` (metadata) |
+| HarmonyOS | `.hap`, `.hsp`, `.app` packs |
+| Browser extensions | `.crx` (v2/v3), `.xpi`, extension `.zip` |
+| WeChat mini-programs | `.wxapkg` (unencrypted) |
+| Electron | `app.asar` (standalone, inside installers, macOS bundles and `.deb`) |
+| Anything else | Generic scan for URLs and credentials, with the limit stated |
 
 ## What it reports
 
-- **Embedded SDKs**, with evidence and a confidence level. SDKs with China-nexus indicators are flagged.
-  - Android: Java/Kotlin class packages, native libraries, manifest meta-data, config keys.
-  - iOS: embedded frameworks, linked libraries, resource bundles, Info.plist keys, URL schemes, queried apps, Objective-C class names.
-- **Data access.** Android permissions, or iOS usage-description keys with the app's own stated reason, plus capability frameworks (AdSupport/IDFA, App Tracking Transparency, StoreKit, CoreLocation, …).
-- **Declared data (iOS).** Every privacy manifest (`PrivacyInfo.xcprivacy`) from the app and its SDKs: the data types collected, whether each is linked to identity or used for tracking, and tracking domains.
-- **Endpoints.** URLs found in code, resources, assets, native/Mach-O string sections, plists, privacy manifests and associated domains. Hosts on PRC-headquartered clouds and `.cn` domains are flagged, as are cleartext connections.
-- **App details & signing.**
-  - Android: signing certificate (v1/v2/v3), exported components, cleartext/backup/debuggable flags.
-  - iOS: code-signing certificate (leaf picked from the CMS chain), Team ID, entitlements, provisioning profile, store metadata, App Transport Security exceptions, App Store (FairPlay) encryption status, app extensions, background modes.
-- **Privacy-policy check.** Paste the policy (EN or ZH) to see which detected SDKs and data categories it names, with excerpts, plus any statements about where data is stored.
-- **Why this may matter.** Draft notes tying observations to COPPA, the DOJ Data Security Program, auto-renewal law, VPPA, UDAP and Apple's tracking rules. These are not legal conclusions.
-- **Export.** JSON or print to PDF. The UI is in English and Simplified Chinese.
+- **Risk areas (13).** Each area lists the signals found in the file, why the area may matter (with public cases and laws), and what to verify next. The areas:
+  - data transfers to countries of concern (DSP, PADFA, state AG suits)
+  - children and teens (COPPA, SCOPE, age-signal APIs)
+  - biometrics (BIPA)
+  - wiretap/pen-register SDK claims (CIPA, MHMDA)
+  - location and health data
+  - video viewing (VPPA)
+  - subscriptions (ARL, ROSCA)
+  - loot boxes and social casino
+  - AI chatbots (SB 243)
+  - data security, including hard-coded cloud keys
+  - intrusive device access
+  - disclosures vs. behavior
+  - foreign-adversary-controlled apps (PAFACA)
 
-## Limits (also shown in the app)
-
-- Static analysis only: the app isn't run and no traffic is captured. Packaged code isn't proof that it runs.
-- iOS apps from the App Store have **FairPlay-encrypted** executables. For those, k1d can't read code strings or class names. It still reads frameworks, bundles, Info.plist, privacy manifests and entitlements, but SDKs linked statically into the encrypted executable can be missed. k1d does not decrypt apps.
-- The SDK and infrastructure knowledge base (`site/kb/`) is an **unverified starter seed**.
-- Certificates are read, not verified.
+  These are draft notes, not legal conclusions.
+- **SDKs (94 in the knowledge base).** Includes China-origin ad, analytics and push SDKs, face/voice biometric SDKs, session replay, video players, AI model APIs (US and PRC), age-assurance APIs, and PC game services and anti-cheat. Each comes with evidence and a confidence level.
+- **Data access.**
+  - Android permissions.
+  - iOS usage keys, with the app's stated reason.
+  - Windows capability APIs (keyboard hooks, credential access, hardware IDs, …) and admin rights.
+  - MSIX capabilities, HarmonyOS permissions, extension permissions, mini-program APIs and scopes.
+- **Declared data (iOS/macOS).** Privacy manifests from the app and every SDK.
+- **Endpoints.** Hosts on PRC clouds and `.cn` domains are flagged, as are cleartext connections.
+- **Hard-coded credentials.** AWS, Alibaba Cloud, Tencent Cloud, private keys, GitHub, Slack, Stripe, FCM and OpenAI-style keys. Values are always masked.
+- **Signing.** APK v1–v3, iOS/macOS code signing (Team ID, entitlements), Authenticode (signer chosen by serial number), MSIX, pkg.
+- **Privacy-policy check (EN/ZH)** and **export** (JSON, print to PDF).
 
 ## Run locally
 
@@ -37,7 +55,7 @@ k1d reads a mobile app file **in your browser** and shows what's inside it. Anyo
 node tools/serve.mjs 8080
 ```
 
-Then open http://localhost:8080/. The local server also serves the test fixtures at `/__fixtures__/` for manual testing. GitHub Pages does not.
+Then open http://localhost:8080/. The local server also serves the test fixtures at `/__fixtures__/`.
 
 ## Tests
 
@@ -46,24 +64,18 @@ node --test tests/*.test.mjs
 node scripts/check-claims.mjs
 ```
 
-Synthetic fixtures live in `tests/fixtures/`:
-
-- `k1d-demo.apk` and `k1d-demo.aab` are built by `tools/build-demo-apk.mjs` using Google's `aapt2` (binary and protobuf manifests). Their ground truth (package, version, permissions) comes from `aapt2`, and the certificate fingerprint from `openssl`.
-- `k1d-demo.ipa` is built by `tools/build-demo-ipa.mjs`. It contains a binary Info.plist, arm64 Mach-O executables with load commands and string sections, a code signature whose CMS and certificate chain come from `openssl`, privacy manifests, frameworks, an App Store-encrypted framework, a provisioning profile and store metadata.
-- The XAPK/APKM path is tested by wrapping the APK.
+- **Android:** ground truth comes from Google's `aapt2` (binary and protobuf manifests) and `openssl`.
+- **iOS:** a synthetic IPA with an `openssl` CMS chain.
+- **Other formats:** fixtures built by `tools/build-demo-formats.mjs` (signers from `openssl`). `IdleQuest.msi` is created by Windows Installer itself.
+- **Real binaries:** `tests/real-binaries.test.mjs` checks real signed Windows executables against the thumbprints and version info that Windows reports. It is skipped where the files aren't present, for example in CI.
 
 `check-claims` fails the build if the site contains verdict language ("violates", "compliant", 违法, 合规, …).
 
-## Layout
+## Limits
 
-```
-site/            the web app served by GitHub Pages
-  js/            zip, AXML + protobuf manifest, DEX, plist, Mach-O, code signature, certificate parsers;
-                 Android + iOS analyzers; policy check; notes; UI
-  kb/            SDK signatures (Android + iOS), infrastructure operators, permission/usage categories
-tests/           node:test suites + synthetic fixtures + ground truth
-tools/           fixture builders, zip writer, local static server
-scripts/         banned-phrase check
-```
+- Static analysis only. Presence of code isn't proof it runs.
+- Encrypted App Store executables and compressed installer payloads are only partly readable. The UI says so whenever this applies.
+- The knowledge base is an **unverified starter seed**.
+- Signatures are read, not verified.
 
 k1d provides factual analysis, not legal advice.

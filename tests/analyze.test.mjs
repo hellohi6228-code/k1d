@@ -133,6 +133,9 @@ test('XAPK / APKM split bundle: base APK inside an outer zip', async () => {
   assert.deepEqual(r.sdks.map((s) => s.id).sort(), result.sdks.map((s) => s.id).sort());
 });
 
-test('rejects non-app input', async () => {
-  await assert.rejects(analyzeSource(bytesSource(new Uint8Array(100)), kb), /NOT_A_ZIP/);
+test('unrecognized input gets a generic scan with a stated limit, not an error', async () => {
+  const r = await analyzeSource(bytesSource(new Uint8Array(100)), kb);
+  assert.equal(r.container, 'unknown');
+  assert.equal(r.limits.length, 1);
+  await assert.rejects(analyzeSource(bytesSource(new Uint8Array(2)), kb), /NOT_A_ZIP/);
 });
