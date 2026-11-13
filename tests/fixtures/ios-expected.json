@@ -1,0 +1,49 @@
+{
+  "note": "Ground truth for tests/ios.test.mjs. Values written by tools/build-demo-ipa.mjs; certificate fingerprint computed by openssl.",
+  "bundleId": "com.k1d.demo.idlequest",
+  "version": "1.4.2",
+  "build": "42",
+  "minimumOS": "15.0",
+  "teamId": "K1DTEAM123",
+  "leafCertSha256": "b24d91b17af8f1c267f12fefbf3878ae5a682ac7839d7671e4b48ab9a8413bc8",
+  "usageKeys": [
+    "NSLocationWhenInUseUsageDescription",
+    "NSCameraUsageDescription",
+    "NSMicrophoneUsageDescription",
+    "NSPhotoLibraryUsageDescription",
+    "NSUserTrackingUsageDescription"
+  ],
+  "linkedSystem": [
+    "AVFoundation",
+    "AdSupport",
+    "AppTrackingTransparency",
+    "CoreLocation",
+    "Foundation",
+    "StoreKit",
+    "UIKit"
+  ],
+  "frameworks": [
+    "AppsFlyerLib",
+    "FBSDKCoreKit",
+    "PAGAdSDK",
+    "UnityFramework"
+  ],
+  "expectedSdks": [
+    "pangle",
+    "umeng",
+    "jpush",
+    "wechat_opensdk",
+    "qq_connect",
+    "meta_sdk",
+    "google_mobile_ads",
+    "firebase_analytics",
+    "appsflyer",
+    "unity_engine"
+  ],
+  "notExpectedSdks": [
+    "tencent_gdt",
+    "applovin",
+    "google_play_billing"
+  ],
+  "ipaSha256": "9651bc4b4e3f8fc21817ff56175bfdfb9dd5387a5f1272185901d227df9dbb89"
+}

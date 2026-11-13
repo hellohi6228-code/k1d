@@ -10,10 +10,11 @@ import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+import { writeZip } from './ziplib.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = path.join(root, 'tools', 'demo-src');
-const outApk = path.join(root, 'site', 'demo', 'k1d-demo.apk');
+const outApk = path.join(root, 'tests', 'fixtures', 'k1d-demo.apk');
 const expectedOut = path.join(root, 'tests', 'fixtures', 'demo-expected.json');
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'k1d-demo-'));
 
@@ -217,35 +218,36 @@ const pair = Buffer.concat([u64(4 + v2Value.length), u32(0x7109871a), v2Value]);
 const blockSize = pair.length + 8 + 16;
 const sigBlock = Buffer.concat([u64(blockSize), pair, u64(blockSize), Buffer.from('APK Sig Block 42', 'latin1')]);
 
-const parts = [];
-const central = [];
-let offset = 0;
-for (const e of entries) {
-  const crc = zlib.crc32(e.data);
-  const comp = e.method === 8 ? zlib.deflateRawSync(e.data) : e.data;
-  const name = Buffer.from(e.name, 'utf8');
-  const lfh = Buffer.alloc(30);
-  lfh.writeUInt32LE(0x04034b50, 0); lfh.writeUInt16LE(20, 4); lfh.writeUInt16LE(0x0800, 6); lfh.writeUInt16LE(e.method, 8);
-  lfh.writeUInt16LE(0, 10); lfh.writeUInt16LE(0x5b21, 12); lfh.writeUInt32LE(crc, 14); lfh.writeUInt32LE(comp.length, 18);
-  lfh.writeUInt32LE(e.data.length, 22); lfh.writeUInt16LE(name.length, 26); lfh.writeUInt16LE(0, 28);
-  const cdh = Buffer.alloc(46);
-  cdh.writeUInt32LE(0x02014b50, 0); cdh.writeUInt16LE(20, 4); cdh.writeUInt16LE(20, 6); cdh.writeUInt16LE(0x0800, 8);
-  cdh.writeUInt16LE(e.method, 10); cdh.writeUInt16LE(0, 12); cdh.writeUInt16LE(0x5b21, 14); cdh.writeUInt32LE(crc, 16);
-  cdh.writeUInt32LE(comp.length, 20); cdh.writeUInt32LE(e.data.length, 24); cdh.writeUInt16LE(name.length, 28);
-  cdh.writeUInt32LE(offset, 42);
-  central.push(cdh, name);
-  parts.push(lfh, name, comp);
-  offset += 30 + name.length + comp.length;
-}
-parts.push(sigBlock);
-offset += sigBlock.length;
-const cdBuf = Buffer.concat(central);
-const eocd = Buffer.alloc(22);
-eocd.writeUInt32LE(0x06054b50, 0); eocd.writeUInt16LE(entries.length, 8); eocd.writeUInt16LE(entries.length, 10);
-eocd.writeUInt32LE(cdBuf.length, 12); eocd.writeUInt32LE(offset, 16);
-const apk = Buffer.concat([...parts, cdBuf, eocd]);
+const apk = writeZip(entries, { beforeCentralDirectory: sigBlock });
 fs.mkdirSync(path.dirname(outApk), { recursive: true });
 fs.writeFileSync(outApk, apk);
+
+// ---------- 5b. Android App Bundle: same app, protobuf manifest (aapt2 --proto-format) ----------
+const protoDir = path.join(work, 'proto');
+fs.mkdirSync(protoDir);
+run(tools.aapt2, ['link', '--proto-format', '-o', protoDir, '--output-to-dir', '-I', tools.androidJar, '--manifest', path.join(src, 'AndroidManifest.xml'), compiled]);
+const aabEntries = [
+  { name: 'BundleConfig.pb', data: Buffer.alloc(0) },
+  { name: 'base/manifest/AndroidManifest.xml', data: fs.readFileSync(path.join(protoDir, 'AndroidManifest.xml')) },
+  { name: 'base/resources.pb', data: fs.readFileSync(path.join(protoDir, 'resources.pb')) },
+  { name: 'base/dex/classes.dex', data: dex1 },
+  { name: 'base/dex/classes2.dex', data: dex2 },
+  ...Object.entries(libs).map(([n, d]) => ({ name: 'base/' + n, data: d })),
+  { name: 'base/assets/remote_config.json', data: entries.find((e) => e.name === 'assets/remote_config.json').data },
+  { name: 'META-INF/MANIFEST.MF', data: Buffer.from('Manifest-Version: 1.0\r\n\r\n') },
+  { name: 'META-INF/CERT.RSA', data: fs.readFileSync(p7) },
+];
+const outAab = outApk.replace(/\.apk$/, '.aab');
+fs.writeFileSync(outAab, writeZip(aabEntries));
+// oracle: aapt2 itself must be able to read the protobuf manifest we packaged
+const protoApk = path.join(work, 'proto-check.apk');
+fs.writeFileSync(protoApk, writeZip([
+  { name: 'AndroidManifest.xml', data: fs.readFileSync(path.join(protoDir, 'AndroidManifest.xml')) },
+  { name: 'resources.pb', data: fs.readFileSync(path.join(protoDir, 'resources.pb')) },
+]));
+const protoTree = run(tools.aapt2, ['dump', 'xmltree', '--file', 'AndroidManifest.xml', protoApk]);
+if (!protoTree.includes('com.k1d.demo.idlequest')) throw new Error('aapt2 could not read proto manifest:\n' + protoTree);
+const protoPerms = [...protoTree.matchAll(/E: uses-permission[\s\S]*?A: http:\/\/schemas\.android\.com\/apk\/res\/android:name\([^)]*\)="([^"]+)"/g)].map((m) => m[1]);
 
 // ---------- 6. oracle: Google's aapt2 must be able to read our APK ----------
 const badging = run(tools.aapt2, ['dump', 'badging', outApk]);
@@ -262,6 +264,7 @@ fs.writeFileSync(expectedOut, JSON.stringify({
   permissions: perms,
   certSha256,
   apkSha256: createHash('sha256').update(apk).digest('hex'),
+  aabProtoPermissionsPerAapt2: protoPerms,
   classes: [...dex1Classes, ...dex2Classes].length,
   expectedSdks: ['pangle', 'umeng', 'jpush', 'tencent_bugly', 'google_play_billing', 'firebase_analytics', 'google_mobile_ads', 'appsflyer', 'unity_engine', 'msa_oaid'],
   notExpectedSdks: ['meta_sdk', 'tencent_gdt', 'applovin'],

@@ -47,13 +47,21 @@ export function checkPolicy(text, result, permissionsKb) {
       return { id: s.id, name: s.name, vendor: s.vendor, cnNexus: s.cnNexus, match: findFirst(text, terms) };
     });
 
-  const cats = [...new Set(result.permissions.map((p) => p.category).filter((c) => c && c !== 'other'))];
-  const categoryChecks = cats.map((c) => {
+  // Categories come from Android permissions / iOS usage keys and, on iOS, from privacy-manifest declarations.
+  const sources = new Map();
+  const add = (cat, src) => {
+    if (!cat || cat === 'other' || !permissionsKb.categories[cat]) return;
+    if (!sources.has(cat)) sources.set(cat, []);
+    sources.get(cat).push(src);
+  };
+  for (const p of result.permissions) add(p.category, p.name);
+  for (const d of result.ios?.declaredData ?? []) add(d.category, `${d.type.replace(/^NSPrivacyCollectedDataType/, '')} (privacy manifest)`);
+  const categoryChecks = [...sources].map(([c, srcs]) => {
     const def = permissionsKb.categories[c];
     return {
       category: c,
       label: { en: def.en, zh: def.zh },
-      permissions: result.permissions.filter((p) => p.category === c).map((p) => p.name),
+      permissions: [...new Set(srcs)],
       match: findFirst(text, def.keywords),
     };
   });
@@ -73,17 +81,3 @@ export function checkPolicy(text, result, permissionsKb) {
     statements,
   };
 }
-
-export const DEMO_POLICY = `Idle Quest Privacy Policy (synthetic demo text)
-
-We collect information you provide, such as your nickname and in-game purchases. We also collect device information, including device identifiers and your advertising ID, to measure ad performance.
-
-With your permission, we collect your precise location to show nearby events.
-
-We work with service providers including Google (Firebase) for analytics and AppsFlyer for attribution. These partners may receive device identifiers.
-
-Your information is stored on servers located in the United States and is not transferred to other countries.
-
-Children: Idle Quest is not directed to children under 13.
-
-Contact: privacy@k1d-demo.example`;

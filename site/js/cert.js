@@ -79,21 +79,34 @@ function children(buf, tlv) {
   return out;
 }
 
-// v1: PKCS#7 SignedData in META-INF/*.RSA|DSA|EC -> first certificate DER.
-export function certFromPkcs7(buf) {
+// All certificates in a PKCS#7 / CMS SignedData blob.
+export function certsFromPkcs7(buf) {
   const ci = readTLV(buf, 0);
   const [, explicit] = children(buf, ci);
   const signedData = children(buf, explicit)[0];
   for (const c of children(buf, signedData)) {
-    if (c.tag === 0xa0) {
-      const cert = children(buf, c)[0];
-      return buf.slice(cert.start, cert.end);
-    }
+    if (c.tag === 0xa0) return children(buf, c).map((cert) => buf.slice(cert.start, cert.end));
   }
-  return null;
+  return [];
 }
 
-const OID_NAMES = { '2.5.4.3': 'CN', '2.5.4.6': 'C', '2.5.4.7': 'L', '2.5.4.8': 'ST', '2.5.4.10': 'O', '2.5.4.11': 'OU' };
+// v1: PKCS#7 SignedData in META-INF/*.RSA|DSA|EC -> first certificate DER.
+export function certFromPkcs7(buf) {
+  return certsFromPkcs7(buf)[0] ?? null;
+}
+
+// iOS code-signing CMS carries the chain; pick the leaf (signer), not Apple's CA certificates.
+export function leafCertFromCms(buf) {
+  const certs = certsFromPkcs7(buf).map((der) => ({ der, info: describeCert(der) }));
+  if (!certs.length) return null;
+  // The leaf is the one certificate that is not the issuer of any other certificate in the set.
+  const key = (n) => JSON.stringify(n ?? {});
+  const issuers = new Set(certs.map((c) => key(c.info?.issuer)));
+  const leaf = certs.find((c) => !issuers.has(key(c.info?.subject))) ?? certs[0];
+  return leaf.der;
+}
+
+const OID_NAMES = { '2.5.4.3': 'CN', '2.5.4.6': 'C', '2.5.4.7': 'L', '2.5.4.8': 'ST', '2.5.4.10': 'O', '2.5.4.11': 'OU', '0.9.2342.19200300.100.1.1': 'UID' };
 
 function decodeOid(bytes) {
   const parts = [Math.floor(bytes[0] / 40), bytes[0] % 40];

@@ -10,7 +10,7 @@ export function buildNotes(result, context, policy) {
   const cnHosts = result.endpoints.filter((e) => e.cnIndicators.length);
   const certCn = result.cert?.subject?.C === 'CN';
   const tracking = result.sdks.filter((s) => TRACKING.has(s.category));
-  const perm = (n) => result.permissions.some((p) => p.name === n);
+  const caps = result.capabilities;
 
   if (cnSdks.length || cnHosts.length || certCn) {
     notes.push({
@@ -42,13 +42,14 @@ export function buildNotes(result, context, policy) {
     });
   }
 
-  if (perm('com.android.vending.BILLING') || result.sdks.some((s) => s.id === 'google_play_billing')) {
+  if (caps.billing) {
+    const ios = result.platform === 'ios';
     notes.push({
       id: 'arl',
       citation: 'Cal. Bus. & Prof. Code § 17600 et seq. (California Automatic Renewal Law) and similar state laws',
       observation: {
-        en: 'The app includes Google Play Billing, so it can sell in-app purchases and possibly subscriptions.',
-        zh: '该应用包含 Google Play 结算，可以销售应用内购买项目，并可能销售订阅。',
+        en: ios ? 'The app links Apple StoreKit, so it can sell in-app purchases and possibly subscriptions.' : 'The app includes Google Play Billing, so it can sell in-app purchases and possibly subscriptions.',
+        zh: ios ? '该应用链接了 Apple StoreKit，可以销售应用内购买项目，并可能销售订阅。' : '该应用包含 Google Play 结算，可以销售应用内购买项目，并可能销售订阅。',
       },
       why: {
         en: 'If the app sells auto-renewing subscriptions, the paywall disclosures (price, billing period, renewal terms, cancellation) are a topic under automatic-renewal laws. This static scan does not look at paywall screens.',
@@ -106,13 +107,32 @@ export function buildNotes(result, context, policy) {
     }
   }
 
-  if (result.manifest.application.usesCleartextTraffic || result.endpoints.some((e) => e.cleartext)) {
+  if (result.platform === 'ios' && (caps.declaresTracking || caps.trackingPrompt)) {
+    const pms = result.ios.privacyManifests.filter((p) => p.tracking);
+    const domains = [...new Set(pms.flatMap((p) => p.trackingDomains))];
+    notes.push({
+      id: 'ios_tracking',
+      citation: null,
+      observation: {
+        en: `${pms.length} privacy manifest(s) declare tracking (${pms.map((p) => p.owner).join(', ') || '—'}) with ${domains.length} tracking domain(s); the app ${caps.trackingPrompt ? 'includes' : 'does not include'} an App Tracking Transparency prompt text.`,
+        zh: `${pms.length} 个隐私清单声明了跟踪（${pms.map((p) => p.owner).join('、') || '—'}），涉及 ${domains.length} 个跟踪域名；应用${caps.trackingPrompt ? '包含' : '不包含'} App Tracking Transparency 提示文字。`,
+      },
+      why: {
+        en: 'Apple requires apps to ask permission through App Tracking Transparency before tracking. Comparing these declarations with the App Store privacy label and the privacy policy shows whether the disclosures line up.',
+        zh: 'Apple 要求应用在跟踪前通过 App Tracking Transparency 征得许可。将这些声明与 App Store 隐私标签和隐私政策对照，可以看出各项披露是否一致。',
+      },
+    });
+  }
+
+  if (caps.cleartext || result.endpoints.some((e) => e.cleartext)) {
+    const n = result.endpoints.filter((e) => e.cleartext).length;
+    const where = result.platform === 'ios' ? { en: 'App Transport Security settings', zh: 'App Transport Security 设置' } : { en: 'the manifest', zh: '清单' };
     notes.push({
       id: 'cleartext',
       citation: null,
       observation: {
-        en: `Cleartext traffic is ${result.manifest.application.usesCleartextTraffic ? 'allowed in the manifest' : 'not enabled in the manifest'}; ${result.endpoints.filter((e) => e.cleartext).length} host(s) appear with http:// or ws:// URLs.`,
-        zh: `清单中${result.manifest.application.usesCleartextTraffic ? '允许' : '未开启'}明文流量；有 ${result.endpoints.filter((e) => e.cleartext).length} 个主机以 http:// 或 ws:// URL 形式出现。`,
+        en: `Cleartext (unencrypted) connections are ${caps.cleartext ? 'allowed' : 'not enabled'} in ${where.en}; ${n} host(s) appear with http:// or ws:// URLs.`,
+        zh: `${where.zh}中${caps.cleartext ? '允许' : '未开启'}明文（未加密）连接；有 ${n} 个主机以 http:// 或 ws:// URL 形式出现。`,
       },
       why: {
         en: 'Data sent over unencrypted connections can be read by anyone on the network path. This is a security observation, not tied to a specific rule.',
@@ -131,6 +151,7 @@ export const LIMITATIONS = {
     'Endpoint hosts are strings found in the file. No traffic was captured, so we cannot say which hosts the app contacts or what data it sends.',
     'A domain operator (for example a cloud provider) does not establish where data is stored or processed.',
     'The signing certificate is read but its signature is not verified.',
+    'iOS apps downloaded from the App Store have encrypted executables (FairPlay). For those, code strings and class names cannot be read; SDKs are found from frameworks, resource bundles, Info.plist and privacy manifests, so SDKs linked statically into the encrypted executable can be missed.',
     'Not assessed in this version: runtime behavior before and after consent or age gates, use of platform age-signal APIs, paywall screens, ownership chains beyond the vendor named in the knowledge base.',
   ],
   zh: [
@@ -139,6 +160,7 @@ export const LIMITATIONS = {
     '接口主机是在文件中发现的字符串。本次未抓取流量，因此无法确定应用会访问哪些主机或发送哪些数据。',
     '域名运营方（例如云服务商）不能说明数据存储或处理的地点。',
     '本工具读取签名证书，但不校验签名。',
+    '从 App Store 下载的 iOS 应用，其可执行文件经过加密（FairPlay），无法读取代码字符串和类名；SDK 通过框架、资源包、Info.plist 和隐私清单识别，因此静态链接进加密可执行文件的 SDK 可能被遗漏。',
     '本版本未评估：同意或年龄门槛前后的运行时行为、平台年龄信号 API 的使用、付费墙页面，以及知识库所列提供方之外的所有权链条。',
   ],
 };

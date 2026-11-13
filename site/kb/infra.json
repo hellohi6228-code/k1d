@@ -38,6 +38,7 @@
     "schemas.android.com", "www.w3.org", "w3.org", "ns.adobe.com", "xmlpull.org", "www.xmlpull.org",
     "purl.org", "schemas.xmlsoap.org", "schemas.microsoft.com", "json-schema.org", "www.apache.org",
     "apache.org", "xml.org", "www.example.com", "example.com", "localhost", "127.0.0.1", "xml.apache.org",
-    "www.slf4j.org", "javax.xml.xmlconstants", "relaxng.org", "www.relaxng.org", "xmlns.com"
+    "www.slf4j.org", "javax.xml.xmlconstants", "relaxng.org", "www.relaxng.org", "xmlns.com",
+    "www.apple.com", "apple.com", "ocsp.apple.com", "crl.apple.com", "www.apple.com.cn"
   ]
 }

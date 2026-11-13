@@ -1,28 +1,43 @@
-# k1d — static evidence about Android apps
+# k1d — what's inside this app?
 
-k1d reads an Android app file (APK, XAPK or APKS) **in your browser** and reports:
+**Live:** https://hellohi6228-code.github.io/k1d/
 
-- **Embedded SDKs**: matched by code package, native library, manifest key, config key and endpoint domain, with the evidence and a confidence level. SDKs with China-nexus indicators are flagged.
-- **Permissions**: grouped by the personal-data category they unlock.
-- **Hard-coded endpoints**: URLs found in DEX code, `resources.arsc`, assets and native `.so` libraries. Hosts on PRC-headquartered clouds or `.cn` domains are flagged.
-- **Manifest and signing facts**: exported components, cleartext/backup/debuggable flags, meta-data, package queries, and the signing certificate (SHA-256 fingerprint, subject, issuer, validity) from the v2/v3 block or v1 PKCS#7.
-- **Privacy-policy check**: paste the policy (EN or ZH) to see which detected SDKs and data categories it names, with excerpts, plus any statements about where data is stored.
-- **Why this may matter**: draft notes that tie observations to COPPA, the DOJ Data Security Program, auto-renewal law, VPPA and UDAP. These are not legal conclusions.
-- **Export**: JSON (including the authorization record) or print to PDF. UI in English and Simplified Chinese.
+k1d reads a mobile app file **in your browser** and shows what's inside it. Anyone can use it on an app they obtained lawfully: an app on their own phone, or an app their company publishes. Use it to check whether an app you rely on embeds trackers or connects to servers you wouldn't expect. The file is never uploaded, and there is no server.
 
-The file is never uploaded. The site is static, and there is no server.
+| Platform | Formats |
+|---|---|
+| Android | `.apk`, `.aab` (App Bundle), `.xapk`, `.apks`, `.apkm` (split bundles) |
+| iOS | `.ipa` |
 
-## Use it
+## What it reports
 
-Open **https://hellohi6228-code.github.io/k1d/**, then drop in an APK or click **Try the synthetic demo APK**.
+- **Embedded SDKs**, with evidence and a confidence level. SDKs with China-nexus indicators are flagged.
+  - Android: Java/Kotlin class packages, native libraries, manifest meta-data, config keys.
+  - iOS: embedded frameworks, linked libraries, resource bundles, Info.plist keys, URL schemes, queried apps, Objective-C class names.
+- **Data access.** Android permissions, or iOS usage-description keys with the app's own stated reason, plus capability frameworks (AdSupport/IDFA, App Tracking Transparency, StoreKit, CoreLocation, …).
+- **Declared data (iOS).** Every privacy manifest (`PrivacyInfo.xcprivacy`) from the app and its SDKs: the data types collected, whether each is linked to identity or used for tracking, and tracking domains.
+- **Endpoints.** URLs found in code, resources, assets, native/Mach-O string sections, plists, privacy manifests and associated domains. Hosts on PRC-headquartered clouds and `.cn` domains are flagged, as are cleartext connections.
+- **App details & signing.**
+  - Android: signing certificate (v1/v2/v3), exported components, cleartext/backup/debuggable flags.
+  - iOS: code-signing certificate (leaf picked from the CMS chain), Team ID, entitlements, provisioning profile, store metadata, App Transport Security exceptions, App Store (FairPlay) encryption status, app extensions, background modes.
+- **Privacy-policy check.** Paste the policy (EN or ZH) to see which detected SDKs and data categories it names, with excerpts, plus any statements about where data is stored.
+- **Why this may matter.** Draft notes tying observations to COPPA, the DOJ Data Security Program, auto-renewal law, VPPA, UDAP and Apple's tracking rules. These are not legal conclusions.
+- **Export.** JSON or print to PDF. The UI is in English and Simplified Chinese.
 
-Run it locally (Node 18+):
+## Limits (also shown in the app)
+
+- Static analysis only: the app isn't run and no traffic is captured. Packaged code isn't proof that it runs.
+- iOS apps from the App Store have **FairPlay-encrypted** executables. For those, k1d can't read code strings or class names. It still reads frameworks, bundles, Info.plist, privacy manifests and entitlements, but SDKs linked statically into the encrypted executable can be missed. k1d does not decrypt apps.
+- The SDK and infrastructure knowledge base (`site/kb/`) is an **unverified starter seed**.
+- Certificates are read, not verified.
+
+## Run locally
 
 ```bash
 node tools/serve.mjs 8080
 ```
 
-Then open http://localhost:8080/.
+Then open http://localhost:8080/. The local server also serves the test fixtures at `/__fixtures__/` for manual testing. GitHub Pages does not.
 
 ## Tests
 
@@ -31,33 +46,23 @@ node --test tests/*.test.mjs
 node scripts/check-claims.mjs
 ```
 
-The tests run the analyzer on `site/demo/k1d-demo.apk`, a synthetic APK built by `tools/build-demo-apk.mjs`. The expected values (package, version, permissions, certificate fingerprint) come from Google's `aapt2` and from `openssl`, not from k1d itself. `check-claims` fails the build if the site contains verdict language ("violates", "compliant", 违法, 合规, …).
+Synthetic fixtures live in `tests/fixtures/`:
 
-To rebuild the demo APK you need the Android SDK (build-tools + a platform) and openssl:
+- `k1d-demo.apk` and `k1d-demo.aab` are built by `tools/build-demo-apk.mjs` using Google's `aapt2` (binary and protobuf manifests). Their ground truth (package, version, permissions) comes from `aapt2`, and the certificate fingerprint from `openssl`.
+- `k1d-demo.ipa` is built by `tools/build-demo-ipa.mjs`. It contains a binary Info.plist, arm64 Mach-O executables with load commands and string sections, a code signature whose CMS and certificate chain come from `openssl`, privacy manifests, frameworks, an App Store-encrypted framework, a provisioning profile and store metadata.
+- The XAPK/APKM path is tested by wrapping the APK.
 
-```bash
-node tools/build-demo-apk.mjs
-```
-
-## What it does not do (yet)
-
-- No dynamic analysis: nothing is run, and no traffic is captured. Presence of code or a URL is not proof that it is used.
-- The SDK and infrastructure knowledge base (`site/kb/`) is an **unverified starter seed** built from public package names. It needs expert review before client use.
-- Signatures are read, not verified.
-- No `.aab` support (export a universal APK first) and no iOS.
-- The authorization step is a local attestation. A static site cannot verify app ownership. Server-side ownership verification is part of the full platform design.
-
-The full platform (accounts, ownership verification, a dynamic analysis sandbox, a rule engine and reviewed rule packs) has not been built yet.
+`check-claims` fails the build if the site contains verdict language ("violates", "compliant", 违法, 合规, …).
 
 ## Layout
 
 ```
 site/            the web app served by GitHub Pages
-  js/            zip, AXML, DEX and certificate parsers; analyzer; policy check; notes; UI
-  kb/            SDK signatures, infrastructure operators, permission categories (seed data)
-  demo/          synthetic demo APK
-tests/           node:test suite + ground truth fixture
-tools/           demo APK builder, local static server
+  js/            zip, AXML + protobuf manifest, DEX, plist, Mach-O, code signature, certificate parsers;
+                 Android + iOS analyzers; policy check; notes; UI
+  kb/            SDK signatures (Android + iOS), infrastructure operators, permission/usage categories
+tests/           node:test suites + synthetic fixtures + ground truth
+tools/           fixture builders, zip writer, local static server
 scripts/         banned-phrase check
 ```
 

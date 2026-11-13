@@ -120,6 +120,92 @@ export function parseAXML(buf) {
   return root.children[0] || null;
 }
 
+// ---------------------------------------------------------------------------
+// Android App Bundle manifests are aapt2 protobuf XmlNode messages
+// (frameworks/base/tools/aapt2/Resources.proto), not binary AXML.
+
+function* protoFields(buf, start = 0, end = buf.length) {
+  let p = start;
+  const varint = () => {
+    let v = 0;
+    let mul = 1;
+    let b;
+    do { b = buf[p++]; v += (b & 0x7f) * mul; mul *= 128; } while (b & 0x80 && p < end);
+    return v;
+  };
+  while (p < end) {
+    const key = varint();
+    const field = Math.floor(key / 8);
+    const wire = key & 7;
+    if (wire === 0) yield { field, wire, value: varint() };
+    else if (wire === 2) { const len = varint(); yield { field, wire, start: p, end: p + len }; p += len; }
+    else if (wire === 5) { yield { field, wire, start: p, end: p + 4 }; p += 4; }
+    else if (wire === 1) { yield { field, wire, start: p, end: p + 8 }; p += 8; }
+    else break;
+  }
+}
+
+const tdp = new TextDecoder('utf-8');
+const BOOL_ATTRS = new Set(['exported', 'debuggable', 'allowBackup', 'usesCleartextTraffic', 'enabled']);
+const INT_ATTRS = new Set(['versionCode', 'minSdkVersion', 'targetSdkVersion']);
+
+function protoItemValue(buf, s, e) {
+  for (const f of protoFields(buf, s, e)) {
+    if ((f.field === 2 || f.field === 3) && f.wire === 2) { // String / RawString { value = 1 }
+      for (const g of protoFields(buf, f.start, f.end)) if (g.field === 1 && g.wire === 2) return tdp.decode(buf.subarray(g.start, g.end));
+    }
+    if (f.field === 7 && f.wire === 2) { // Primitive
+      for (const g of protoFields(buf, f.start, f.end)) {
+        if (g.field === 8 && g.wire === 0) return g.value !== 0;
+        if ((g.field === 6 || g.field === 7) && g.wire === 0) return g.value;
+      }
+    }
+    if (f.field === 1 && f.wire === 2) { // Reference { id = 2 }
+      for (const g of protoFields(buf, f.start, f.end)) if (g.field === 2 && g.wire === 0) return '@0x' + g.value.toString(16).padStart(8, '0');
+    }
+  }
+  return undefined;
+}
+
+function protoElement(buf, s, e) {
+  const el = { tag: '', attrs: {}, children: [] };
+  for (const f of protoFields(buf, s, e)) {
+    if (f.field === 3 && f.wire === 2) el.tag = tdp.decode(buf.subarray(f.start, f.end));
+    else if (f.field === 4 && f.wire === 2) {
+      let name = '';
+      let value;
+      let resId = 0;
+      let compiled;
+      for (const g of protoFields(buf, f.start, f.end)) {
+        if (g.field === 2 && g.wire === 2) name = tdp.decode(buf.subarray(g.start, g.end));
+        else if (g.field === 3 && g.wire === 2) value = tdp.decode(buf.subarray(g.start, g.end));
+        else if (g.field === 5 && g.wire === 0) resId = g.value;
+        else if (g.field === 6 && g.wire === 2) compiled = protoItemValue(buf, g.start, g.end);
+      }
+      if (!name || !/^[A-Za-z]/.test(name)) name = RES_IDS[resId] || name || 'attr';
+      let v = compiled !== undefined && (value === undefined || value === '') ? compiled : value;
+      if (BOOL_ATTRS.has(name) && typeof v === 'string') v = v === 'true';
+      if (INT_ATTRS.has(name) && typeof v === 'string' && /^-?\d+$/.test(v)) v = Number(v);
+      el.attrs[name] = v ?? '';
+    } else if (f.field === 5 && f.wire === 2) {
+      const child = protoNode(buf, f.start, f.end);
+      if (child) el.children.push(child);
+    }
+  }
+  return el;
+}
+
+function protoNode(buf, s, e) {
+  for (const f of protoFields(buf, s, e)) if (f.field === 1 && f.wire === 2) return protoElement(buf, f.start, f.end);
+  return null; // text node
+}
+
+export function parseProtoXml(buf) {
+  const root = protoNode(buf, 0, buf.length);
+  if (!root || !root.tag) throw new Error('NOT_PROTO_XML');
+  return root;
+}
+
 // Global string pool of resources.arsc (where hard-coded URLs in string resources live).
 export function parseArscStrings(buf) {
   const d = view(buf);
@@ -157,7 +243,7 @@ export function summarizeManifest(root) {
       const hasFilter = child.children.some((c) => c.tag === 'intent-filter');
       let exported = child.attrs.exported;
       if (exported === undefined) exported = child.tag === 'provider' ? (targetSdk !== null && targetSdk < 17) : hasFilter;
-      components.push({ type: child.tag, name, exported: exported === true, hasIntentFilter: hasFilter });
+      components.push({ type: child.tag, name, exported: exported === true || exported === 'true', hasIntentFilter: hasFilter });
     } else if (child.tag === 'meta-data') {
       metaData.push({ name: String(child.attrs.name ?? ''), value: child.attrs.value ?? child.attrs.resource ?? '' });
     }

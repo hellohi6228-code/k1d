@@ -1,4 +1,4 @@
-// End-to-end test of the in-browser analyzer against the synthetic demo APK.
+// Android analysis against the synthetic fixtures built by tools/build-demo-apk.mjs.
 // Ground truth (tests/fixtures/demo-expected.json) comes from aapt2 + openssl, not from our code.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -17,12 +17,15 @@ const kb = {
   permissions: readJson('site/kb/permissions.json'),
 };
 const expected = readJson('tests/fixtures/demo-expected.json');
-const apkBytes = new Uint8Array(fs.readFileSync(path.join(root, 'site/demo/k1d-demo.apk')));
+const apkBytes = new Uint8Array(fs.readFileSync(path.join(root, 'tests/fixtures/k1d-demo.apk')));
+const aabBytes = new Uint8Array(fs.readFileSync(path.join(root, 'tests/fixtures/k1d-demo.aab')));
 
 const result = await analyzeSource(bytesSource(apkBytes), kb);
+const aab = await analyzeSource(bytesSource(aabBytes), kb);
 
 test('manifest matches aapt2', () => {
-  assert.equal(result.app.package, expected.package);
+  assert.equal(result.platform, 'android');
+  assert.equal(result.app.id, expected.package);
   assert.equal(Number(result.app.versionCode), expected.versionCode);
   assert.equal(result.app.versionName, expected.versionName);
   assert.equal(Number(result.app.minSdk), 24);
@@ -31,18 +34,18 @@ test('manifest matches aapt2', () => {
 });
 
 test('application flags and components', () => {
-  assert.equal(result.manifest.application.usesCleartextTraffic, true);
-  assert.equal(result.manifest.application.allowBackup, true);
-  const exported = result.manifest.exportedComponents.map((c) => c.name).sort();
+  assert.equal(result.android.application.usesCleartextTraffic, true);
+  assert.equal(result.android.application.allowBackup, true);
+  const exported = result.android.exportedComponents.map((c) => c.name).sort();
   assert.deepEqual(exported, [
     'cn.jpush.android.service.PushService',
     'com.k1d.demo.idlequest.MainActivity',
     'com.k1d.demo.idlequest.PromoReceiver', // implicit export via intent-filter
   ]);
-  const meta = Object.fromEntries(result.manifest.metaData.map((m) => [m.name, m.value]));
+  const meta = Object.fromEntries(result.android.metaData.map((m) => [m.name, m.value]));
   assert.equal(meta.JPUSH_CHANNEL, 'developer-default');
   assert.equal(meta.UMENG_APPKEY, 'k1ddemo00000000000000000');
-  assert.deepEqual(result.manifest.queriedPackages, ['com.tencent.mm']);
+  assert.deepEqual(result.android.queriedPackages, ['com.tencent.mm']);
 });
 
 test('signing certificate fingerprint matches openssl (v2 block)', () => {
@@ -61,8 +64,8 @@ test('v1 PKCS#7 certificate path matches openssl', async () => {
 });
 
 test('all DEX classes are read across multidex', () => {
-  assert.equal(result.inventory.dex.length, 2);
-  assert.ok(result.inventory.classes >= expected.classes);
+  assert.equal(result.android.dex.length, 2);
+  assert.ok(result.android.classes >= expected.classes);
 });
 
 test('expected SDKs detected, others not', () => {
@@ -93,12 +96,43 @@ test('China-nexus indicators on SDKs and endpoints', () => {
   assert.equal(hosts['schemas.android.com'], undefined);
 });
 
-test('config keys and native libs', () => {
+test('config keys, native libs, capabilities', () => {
   assert.ok(result.configKeys.includes('UMENG_APPKEY'));
-  const unity = result.nativeLibs.find((l) => l.name === 'libunity.so');
+  const unity = result.android.nativeLibs.find((l) => l.name === 'libunity.so');
   assert.deepEqual(unity.abis.sort(), ['arm64-v8a', 'armeabi-v7a']);
+  assert.equal(result.capabilities.billing, true);
+  assert.equal(result.capabilities.advertisingId, true);
 });
 
-test('rejects non-APK input', async () => {
+test('AAB: protobuf manifest gives the same facts as aapt2 reports', () => {
+  assert.equal(aab.container, 'aab');
+  assert.equal(aab.app.id, expected.package);
+  assert.equal(aab.app.versionName, expected.versionName);
+  assert.equal(Number(aab.app.versionCode), expected.versionCode);
+  assert.equal(aab.app.targetSdk, 34);
+  assert.deepEqual(aab.permissions.map((p) => p.name).sort(), [...expected.aabProtoPermissionsPerAapt2].sort());
+  assert.equal(aab.android.application.usesCleartextTraffic, true);
+  assert.deepEqual(aab.android.exportedComponents.map((c) => c.name).sort(), result.android.exportedComponents.map((c) => c.name).sort());
+  assert.deepEqual(aab.sdks.map((s) => s.id).sort(), result.sdks.map((s) => s.id).sort());
+  assert.equal(aab.cert.sha256, expected.certSha256); // v1 JAR signature
+  assert.ok(aab.endpoints.some((e) => e.host === 'k1d-demo-assets.oss-us-west-1.aliyuncs.com'), 'URL in resources.pb');
+  assert.deepEqual(aab.errors, []);
+});
+
+test('XAPK / APKM split bundle: base APK inside an outer zip', async () => {
+  const { writeZip } = await import('../tools/ziplib.mjs');
+  const xapk = writeZip([
+    { name: 'manifest.json', data: Buffer.from(JSON.stringify({ package_name: expected.package })) },
+    { name: `${expected.package}.apk`, data: Buffer.from(apkBytes), method: 0 },
+    { name: 'config.arm64_v8a.apk', data: Buffer.from(apkBytes), method: 0 },
+  ]);
+  const r = await analyzeSource(bytesSource(new Uint8Array(xapk)), kb);
+  assert.equal(r.container, 'bundle');
+  assert.equal(r.app.id, expected.package);
+  assert.equal(r.cert.sha256, expected.certSha256);
+  assert.deepEqual(r.sdks.map((s) => s.id).sort(), result.sdks.map((s) => s.id).sort());
+});
+
+test('rejects non-app input', async () => {
   await assert.rejects(analyzeSource(bytesSource(new Uint8Array(100)), kb), /NOT_A_ZIP/);
 });

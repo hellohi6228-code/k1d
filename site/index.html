@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>k1d — Android app evidence</title>
-  <meta name="description" content="Find embedded SDKs, permissions, endpoints and China-nexus indicators in an Android APK. Runs entirely in your browser.">
+  <title>k1d — what's inside this app</title>
+  <meta name="description" content="Find embedded SDKs, data access, endpoints and China-nexus indicators in Android (APK, AAB) and iOS (IPA) apps. Runs entirely in your browser.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23134e4a'/%3E%3Ctext x='16' y='22' font-family='Arial' font-weight='700' font-size='15' text-anchor='middle' fill='%23ecfeff'%3Ek1d%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="css/app.css">
 </head>
@@ -30,16 +30,12 @@
         <p class="lead" data-i18n="heroBody"></p>
       </div>
       <label id="dropzone" class="dropzone" tabindex="0">
-        <input id="file-input" type="file" accept=".apk,.xapk,.apks,application/vnd.android.package-archive" hidden>
+        <input id="file-input" type="file" accept=".apk,.aab,.xapk,.apks,.apkm,.ipa,application/vnd.android.package-archive,application/octet-stream" hidden>
         <svg aria-hidden="true" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 16V4m0 0l-4 4m4-4l4 4"/><path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3"/></svg>
         <strong data-i18n="dropTitle"></strong>
+        <span class="muted small" data-i18n="dropFormats"></span>
         <span class="muted"><span data-i18n="dropOr"></span> <span class="linklike" data-i18n="chooseFile"></span></span>
       </label>
-      <div class="demo-row">
-        <button type="button" id="demo-btn" class="btn btn-secondary" data-i18n="tryDemo"></button>
-        <span class="muted small" data-i18n="demoNote"></span>
-      </div>
-      <p class="privacy-note"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg><span data-i18n="privacyNote"></span></p>
     </section>
 
     <!-- Consent -->
@@ -56,9 +52,9 @@
       </div>
       <form id="consent-form" class="card consent-form" autocomplete="on">
         <div class="field-row">
-          <label><span data-i18n="yourName"></span><input id="c-name" name="name" required autocomplete="name"></label>
-          <label><span data-i18n="yourRole"></span><input id="c-role" name="role" required autocomplete="organization-title"></label>
-          <label><span data-i18n="yourOrg"></span><input id="c-org" name="org" required autocomplete="organization"></label>
+          <label><span data-i18n="yourName"></span><input id="c-name" name="name" autocomplete="name"></label>
+          <label><span data-i18n="yourRole"></span><input id="c-role" name="role" autocomplete="organization-title"></label>
+          <label><span data-i18n="yourOrg"></span><input id="c-org" name="org" autocomplete="organization"></label>
         </div>
         <label class="check">
           <input type="checkbox" id="c-agree" aria-labelledby="c-agree-label">

@@ -16,8 +16,20 @@
     "com.android.vending.BILLING",
     "android.permission.POST_NOTIFICATIONS"
   ],
-  "certSha256": "bba581e2864cc6500249b569827dc4f408a7c0953a14e3cd27b474afe3559e67",
-  "apkSha256": "be9e11730952de16af691faf46149d0bf8f069248164fd4166665a64d4567f10",
+  "certSha256": "db8169888318dc1ba49bfe8348be9d10bcf3238d236ce688b9f3758ede6b47ba",
+  "apkSha256": "9f6a4550aa0758cbec978cecff5bf06958df72b8925e1906f855d75a7ef80e4d",
+  "aabProtoPermissionsPerAapt2": [
+    "android.permission.INTERNET",
+    "android.permission.ACCESS_NETWORK_STATE",
+    "android.permission.ACCESS_FINE_LOCATION",
+    "android.permission.ACCESS_COARSE_LOCATION",
+    "android.permission.READ_PHONE_STATE",
+    "android.permission.RECORD_AUDIO",
+    "android.permission.QUERY_ALL_PACKAGES",
+    "com.google.android.gms.permission.AD_ID",
+    "com.android.vending.BILLING",
+    "android.permission.POST_NOTIFICATIONS"
+  ],
   "classes": 30,
   "expectedSdks": [
     "pangle",
