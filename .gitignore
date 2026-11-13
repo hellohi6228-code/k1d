@@ -1,0 +1,8 @@
+node_modules/
+.DS_Store
+*.log
+.claude/
+
+# Private: business plan, platform design and legal strategy stay local only.
+docs/
+CLAUDE.md

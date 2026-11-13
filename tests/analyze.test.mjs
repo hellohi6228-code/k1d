@@ -1,0 +1,104 @@
+// End-to-end test of the in-browser analyzer against the synthetic demo APK.
+// Ground truth (tests/fixtures/demo-expected.json) comes from aapt2 + openssl, not from our code.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { analyzeSource } from '../site/js/analyze.js';
+import { bytesSource, openZip } from '../site/js/zip.js';
+import { certFromPkcs7, sha256Hex, describeCert } from '../site/js/cert.js';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const readJson = (p) => JSON.parse(fs.readFileSync(path.join(root, p), 'utf8'));
+const kb = {
+  sdks: readJson('site/kb/sdks.json'),
+  infra: readJson('site/kb/infra.json'),
+  permissions: readJson('site/kb/permissions.json'),
+};
+const expected = readJson('tests/fixtures/demo-expected.json');
+const apkBytes = new Uint8Array(fs.readFileSync(path.join(root, 'site/demo/k1d-demo.apk')));
+
+const result = await analyzeSource(bytesSource(apkBytes), kb);
+
+test('manifest matches aapt2', () => {
+  assert.equal(result.app.package, expected.package);
+  assert.equal(Number(result.app.versionCode), expected.versionCode);
+  assert.equal(result.app.versionName, expected.versionName);
+  assert.equal(Number(result.app.minSdk), 24);
+  assert.equal(result.app.targetSdk, 34);
+  assert.deepEqual([...result.permissions.map((p) => p.name)].sort(), [...expected.permissions].sort());
+});
+
+test('application flags and components', () => {
+  assert.equal(result.manifest.application.usesCleartextTraffic, true);
+  assert.equal(result.manifest.application.allowBackup, true);
+  const exported = result.manifest.exportedComponents.map((c) => c.name).sort();
+  assert.deepEqual(exported, [
+    'cn.jpush.android.service.PushService',
+    'com.k1d.demo.idlequest.MainActivity',
+    'com.k1d.demo.idlequest.PromoReceiver', // implicit export via intent-filter
+  ]);
+  const meta = Object.fromEntries(result.manifest.metaData.map((m) => [m.name, m.value]));
+  assert.equal(meta.JPUSH_CHANNEL, 'developer-default');
+  assert.equal(meta.UMENG_APPKEY, 'k1ddemo00000000000000000');
+  assert.deepEqual(result.manifest.queriedPackages, ['com.tencent.mm']);
+});
+
+test('signing certificate fingerprint matches openssl (v2 block)', () => {
+  assert.equal(result.cert.scheme, 'v2');
+  assert.equal(result.cert.sha256, expected.certSha256);
+  assert.equal(result.cert.subject.C, 'CN');
+  assert.equal(result.cert.subject.O, 'k1d Demo Studio');
+  assert.deepEqual(result.signatureSchemes.sort(), ['v1', 'v2']);
+});
+
+test('v1 PKCS#7 certificate path matches openssl', async () => {
+  const zip = await openZip(bytesSource(apkBytes));
+  const der = certFromPkcs7(await zip.readEntry('META-INF/CERT.RSA'));
+  assert.equal(await sha256Hex(der), expected.certSha256);
+  assert.equal(describeCert(der).subject.CN, 'k1d demo signer');
+});
+
+test('all DEX classes are read across multidex', () => {
+  assert.equal(result.inventory.dex.length, 2);
+  assert.ok(result.inventory.classes >= expected.classes);
+});
+
+test('expected SDKs detected, others not', () => {
+  const ids = result.sdks.map((s) => s.id);
+  for (const id of expected.expectedSdks) assert.ok(ids.includes(id), `missing ${id}; got ${ids.join(', ')}`);
+  for (const id of expected.notExpectedSdks) assert.ok(!ids.includes(id), `unexpected ${id}`);
+});
+
+test('AdvertisingIdClient alone is not counted as AdMob code', () => {
+  const admob = result.sdks.find((s) => s.id === 'google_mobile_ads');
+  const code = admob.evidence.find((e) => e.type === 'code');
+  assert.ok(!code.samples.some((s) => s.includes('.identifier.')));
+});
+
+test('China-nexus indicators on SDKs and endpoints', () => {
+  const pangle = result.sdks.find((s) => s.id === 'pangle');
+  assert.ok(pangle.cnNexus);
+  assert.equal(pangle.confidence, 'high');
+  const hosts = Object.fromEntries(result.endpoints.map((e) => [e.host, e]));
+  assert.equal(hosts['k1d-demo-assets.oss-us-west-1.aliyuncs.com'].operator, 'Alibaba Cloud'); // from resources.arsc
+  assert.ok(hosts['events.k1d-demo.cn'].cnIndicators.some((i) => i.type === 'cctld'));
+  assert.equal(hosts['k1d-demo-backup.cos.ap-guangzhou.myqcloud.com'].operator, 'Tencent Cloud'); // from assets
+  assert.ok(hosts['gw.k1d-demo.cn']); // from native lib
+  assert.ok(hosts['pangle.io'].cnIndicators.some((i) => i.type === 'sdk_domain'));
+  assert.equal(hosts['launches.appsflyer.com'].cnIndicators.length, 0);
+  assert.equal(hosts['203.0.113.7'].isIp, true);
+  assert.equal(hosts['203.0.113.7'].cleartext, true);
+  assert.equal(hosts['schemas.android.com'], undefined);
+});
+
+test('config keys and native libs', () => {
+  assert.ok(result.configKeys.includes('UMENG_APPKEY'));
+  const unity = result.nativeLibs.find((l) => l.name === 'libunity.so');
+  assert.deepEqual(unity.abis.sort(), ['arm64-v8a', 'armeabi-v7a']);
+});
+
+test('rejects non-APK input', async () => {
+  await assert.rejects(analyzeSource(bytesSource(new Uint8Array(100)), kb), /NOT_A_ZIP/);
+});

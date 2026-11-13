@@ -1,0 +1,43 @@
+{
+  "version": "seed-2026-11-13",
+  "status": "unverified_seed",
+  "note": "Domain suffixes of infrastructure operated by PRC-headquartered companies. A domain's operator does not establish where data is stored or processed; that needs runtime capture plus IP/ASN enrichment.",
+  "operators": [
+    { "suffix": "aliyuncs.com", "operator": "Alibaba Cloud", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "alicdn.com", "operator": "Alibaba", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "alibaba.com", "operator": "Alibaba", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "myqcloud.com", "operator": "Tencent Cloud", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "qcloud.com", "operator": "Tencent Cloud", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "tencentcloudapi.com", "operator": "Tencent Cloud", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "qq.com", "operator": "Tencent", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "gtimg.com", "operator": "Tencent", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "volces.com", "operator": "Volcano Engine (ByteDance)", "cn_nexus": "Operator's parent headquartered in PRC" },
+    { "suffix": "volceapplog.com", "operator": "Volcano Engine (ByteDance)", "cn_nexus": "Operator's parent headquartered in PRC" },
+    { "suffix": "bytedance.com", "operator": "ByteDance", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "byteimg.com", "operator": "ByteDance", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "snssdk.com", "operator": "ByteDance", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "pstatp.com", "operator": "ByteDance", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "bcebos.com", "operator": "Baidu AI Cloud", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "baidubce.com", "operator": "Baidu AI Cloud", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "baidu.com", "operator": "Baidu", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "huaweicloud.com", "operator": "Huawei Cloud", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "myhuaweicloud.com", "operator": "Huawei Cloud", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "hicloud.com", "operator": "Huawei", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "ksyun.com", "operator": "Kingsoft Cloud", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "qiniu.com", "operator": "Qiniu Cloud", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "qiniucdn.com", "operator": "Qiniu Cloud", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "clouddn.com", "operator": "Qiniu Cloud", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "163.com", "operator": "NetEase", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "netease.com", "operator": "NetEase", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "umeng.com", "operator": "Umeng", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "jpush.cn", "operator": "Aurora Mobile (JPush)", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "igexin.com", "operator": "Getui", "cn_nexus": "Operator headquartered in PRC" },
+    { "suffix": "xiaomi.com", "operator": "Xiaomi", "cn_nexus": "Operator headquartered in PRC" }
+  ],
+  "ignore_hosts": [
+    "schemas.android.com", "www.w3.org", "w3.org", "ns.adobe.com", "xmlpull.org", "www.xmlpull.org",
+    "purl.org", "schemas.xmlsoap.org", "schemas.microsoft.com", "json-schema.org", "www.apache.org",
+    "apache.org", "xml.org", "www.example.com", "example.com", "localhost", "127.0.0.1", "xml.apache.org",
+    "www.slf4j.org", "javax.xml.xmlconstants", "relaxng.org", "www.relaxng.org", "xmlns.com"
+  ]
+}

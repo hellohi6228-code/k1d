@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Idle Quest (k1d demo)</string>
+    <string name="privacy_url">https://www.k1d-demo.example/privacy</string>
+    <string name="cdn_url">https://k1d-demo-assets.oss-us-west-1.aliyuncs.com/config/remote.json</string>
+</resources>

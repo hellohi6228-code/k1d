@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>k1d — Android app evidence</title>
+  <meta name="description" content="Find embedded SDKs, permissions, endpoints and China-nexus indicators in an Android APK. Runs entirely in your browser.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23134e4a'/%3E%3Ctext x='16' y='22' font-family='Arial' font-weight='700' font-size='15' text-anchor='middle' fill='%23ecfeff'%3Ek1d%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="./" aria-label="k1d home">
+        <span class="brand-mark">k1d</span>
+        <span class="brand-tag" data-i18n="tagline"></span>
+      </a>
+      <div class="lang" role="group" aria-label="Language">
+        <button type="button" data-lang="en">EN</button>
+        <button type="button" data-lang="zh">中文</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap" id="main">
+    <!-- Start -->
+    <section id="view-start" class="view">
+      <div class="hero">
+        <h1 data-i18n="heroTitle"></h1>
+        <p class="lead" data-i18n="heroBody"></p>
+      </div>
+      <label id="dropzone" class="dropzone" tabindex="0">
+        <input id="file-input" type="file" accept=".apk,.xapk,.apks,application/vnd.android.package-archive" hidden>
+        <svg aria-hidden="true" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 16V4m0 0l-4 4m4-4l4 4"/><path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3"/></svg>
+        <strong data-i18n="dropTitle"></strong>
+        <span class="muted"><span data-i18n="dropOr"></span> <span class="linklike" data-i18n="chooseFile"></span></span>
+      </label>
+      <div class="demo-row">
+        <button type="button" id="demo-btn" class="btn btn-secondary" data-i18n="tryDemo"></button>
+        <span class="muted small" data-i18n="demoNote"></span>
+      </div>
+      <p class="privacy-note"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg><span data-i18n="privacyNote"></span></p>
+    </section>
+
+    <!-- Consent -->
+    <section id="view-consent" class="view" hidden>
+      <h2 data-i18n="authTitle"></h2>
+      <p class="muted" data-i18n="authIntro"></p>
+      <div class="card">
+        <h3 data-i18n="scopeTitle"></h3>
+        <dl class="kv" id="scope-list"></dl>
+      </div>
+      <div class="card">
+        <h3 data-i18n="termsTitle"></h3>
+        <pre class="terms" id="terms-text" tabindex="0"></pre>
+      </div>
+      <form id="consent-form" class="card consent-form" autocomplete="on">
+        <div class="field-row">
+          <label><span data-i18n="yourName"></span><input id="c-name" name="name" required autocomplete="name"></label>
+          <label><span data-i18n="yourRole"></span><input id="c-role" name="role" required autocomplete="organization-title"></label>
+          <label><span data-i18n="yourOrg"></span><input id="c-org" name="org" required autocomplete="organization"></label>
+        </div>
+        <label class="check">
+          <input type="checkbox" id="c-agree" aria-labelledby="c-agree-label">
+          <span id="c-agree-label"></span>
+        </label>
+        <p class="muted small" id="c-hint" data-i18n="fillFields"></p>
+        <div class="actions">
+          <button type="submit" id="c-submit" class="btn btn-primary" disabled></button>
+          <button type="button" id="c-cancel" class="btn btn-ghost" data-i18n="cancel"></button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Progress -->
+    <section id="view-progress" class="view" hidden>
+      <div class="progress-card">
+        <div class="spinner" aria-hidden="true"></div>
+        <div>
+          <strong data-i18n="analyzing"></strong>
+          <div class="muted" id="progress-text" aria-live="polite"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Error -->
+    <section id="view-error" class="view" hidden>
+      <div class="card error-card">
+        <p id="error-text"></p>
+        <button type="button" class="btn btn-secondary js-restart" data-i18n="startOver"></button>
+      </div>
+    </section>
+
+    <!-- Results -->
+    <section id="view-results" class="view" hidden>
+      <div class="results-head">
+        <div>
+          <h2 id="r-title"></h2>
+          <p class="muted small" id="r-meta"></p>
+        </div>
+        <button type="button" class="btn btn-ghost js-restart" data-i18n="startOver"></button>
+      </div>
+      <div class="stats" id="r-stats"></div>
+      <nav class="tabs" id="r-tabs" role="tablist"></nav>
+      <div id="r-panel" class="panel" role="tabpanel"></div>
+    </section>
+
+    <div id="print-report" class="print-only"></div>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap">
+      <p data-i18n="disclaimer"></p>
+      <p class="muted small">k1d · <a href="https://github.com/hellohi6228-code/k1d" id="repo-link" rel="noopener">source</a></p>
+    </div>
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

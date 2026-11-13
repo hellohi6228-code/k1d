@@ -1,0 +1,39 @@
+{
+  "note": "Ground truth for tests/analyze.test.mjs. Produced by tools/build-demo-apk.mjs from aapt2 + openssl, not by the analyzer.",
+  "aapt2PackageLine": "package: name='com.k1d.demo.idlequest' versionCode='42' versionName='1.4.2' platformBuildVersionName='16' platformBuildVersionCode='36' compileSdkVersion='36' compileSdkVersionCodename='16'\r",
+  "package": "com.k1d.demo.idlequest",
+  "versionCode": 42,
+  "versionName": "1.4.2",
+  "permissions": [
+    "android.permission.INTERNET",
+    "android.permission.ACCESS_NETWORK_STATE",
+    "android.permission.ACCESS_FINE_LOCATION",
+    "android.permission.ACCESS_COARSE_LOCATION",
+    "android.permission.READ_PHONE_STATE",
+    "android.permission.RECORD_AUDIO",
+    "android.permission.QUERY_ALL_PACKAGES",
+    "com.google.android.gms.permission.AD_ID",
+    "com.android.vending.BILLING",
+    "android.permission.POST_NOTIFICATIONS"
+  ],
+  "certSha256": "bba581e2864cc6500249b569827dc4f408a7c0953a14e3cd27b474afe3559e67",
+  "apkSha256": "be9e11730952de16af691faf46149d0bf8f069248164fd4166665a64d4567f10",
+  "classes": 30,
+  "expectedSdks": [
+    "pangle",
+    "umeng",
+    "jpush",
+    "tencent_bugly",
+    "google_play_billing",
+    "firebase_analytics",
+    "google_mobile_ads",
+    "appsflyer",
+    "unity_engine",
+    "msa_oaid"
+  ],
+  "notExpectedSdks": [
+    "meta_sdk",
+    "tencent_gdt",
+    "applovin"
+  ]
+}
