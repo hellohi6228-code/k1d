@@ -206,3 +206,4 @@ textarea.policy { width: 100%; min-height: 200px; resize: vertical; }
 .guides .steps { margin: 8px 0; padding-left: 22px; }
 .guides .steps li { margin: 6px 0; line-height: 1.5; }
 .guides code { overflow-wrap: anywhere; }
+.addrec { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin: 12px 0; }

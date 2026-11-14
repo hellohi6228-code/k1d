@@ -6,6 +6,7 @@ import { checkPolicy } from './policy.js';
 import { buildRisks, LIMITATIONS } from './risks.js';
 import { inferProfile, SYSTEM_HOSTS } from './profile.js';
 import { GUIDES } from './guides.js';
+import { combineResults, RUNTIME_PLATFORMS } from './combine.js';
 
 const MAX_HASH_BYTES = 512 * 1024 * 1024;
 const $ = (id) => document.getElementById(id);
@@ -20,6 +21,10 @@ const state = {
   file: null,
   consent: null,
   fileSha256: null,
+  recFile: null, // recording added to an app file (combine.js)
+  recSha256: null,
+  reuseApp: null,
+  appResult: null,
   result: null,
   policyText: '',
   policy: null,
@@ -99,9 +104,13 @@ function fmtBytes(n) {
 }
 
 // ---------------------------------------------------------------- start
-function pickFile(file) {
-  if (!file) return;
-  state.file = file;
+// One file, or an app file plus a recording of it (either order; sorted out after analysis).
+function pickFile(fileOrList, { reuseApp = null } = {}) {
+  const list = fileOrList instanceof File ? [fileOrList] : [...(fileOrList ?? [])];
+  if (!list.length) return;
+  state.file = list[0];
+  state.recFile = list[1] ?? null;
+  state.reuseApp = reuseApp;
   state.result = null;
   state.policy = null;
   state.policyText = '';
@@ -114,26 +123,33 @@ function pickFile(file) {
 function initStart() {
   const dz = $('dropzone');
   const input = $('file-input');
-  input.addEventListener('change', () => pickFile(input.files[0]));
+  input.addEventListener('change', () => pickFile(input.files));
   dz.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } });
   for (const ev of ['dragenter', 'dragover']) dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add('drag'); });
   for (const ev of ['dragleave', 'drop']) dz.addEventListener(ev, () => dz.classList.remove('drag'));
-  dz.addEventListener('drop', (e) => { e.preventDefault(); pickFile(e.dataTransfer.files[0]); });
+  dz.addEventListener('drop', (e) => { e.preventDefault(); pickFile(e.dataTransfer.files); });
   for (const b of document.querySelectorAll('.js-restart')) b.addEventListener('click', () => { $('file-input').value = ''; show('start'); });
+  $('rec-input').addEventListener('change', (e) => {
+    const rec = e.target.files[0];
+    e.target.value = '';
+    if (rec && state.appResult) { const app = state.file; pickFile([app, rec], { reuseApp: state.appResult }); }
+  });
 }
 
 // ---------------------------------------------------------------- consent
 function scopeText() {
   return [
-    `${L('scopeFile')}: ${state.file.name}`,
-    `${L('scopeSize')}: ${state.file.size} bytes`,
+    `${L('scopeFile')}: ${scopeFiles().map((f) => f.name).join(' + ')}`,
+    `${L('scopeSize')}: ${scopeFiles().reduce((n, f) => n + f.size, 0)} bytes`,
     `${L('scopeTechniques')}: ${L('scopeTechniquesValue')}`,
     `${L('scopeValidity')}: ${L('scopeValidityValue')}`,
   ].join('\n');
 }
 
+const scopeFiles = () => [state.file, state.recFile].filter(Boolean);
+
 function renderConsent() {
-  const f = state.file;
+  const f = { name: scopeFiles().map((x) => x.name).join(' + '), size: scopeFiles().reduce((n, x) => n + x.size, 0) };
   $('scope-list').innerHTML = `
     <dt>${esc(L('scopeFile'))}</dt><dd><code>${esc(f.name)}</code></dd>
     <dt>${esc(L('scopeSize'))}</dt><dd>${esc(fmtBytes(f.size))}</dd>
@@ -142,6 +158,7 @@ function renderConsent() {
   $('terms-text').textContent = TERMS[state.lang];
   $('c-agree-label').textContent = L('consentCheckbox', { v: TERMS_VERSION });
   $('c-submit').textContent = L('consentButton', { file: f.name });
+  $('c-agree').checked = false;
   updateConsentButton();
 }
 
@@ -167,7 +184,7 @@ function initConsent() {
       role: $('c-role').value.trim() || null,
       organization: $('c-org').value.trim() || null,
       checkboxText: L('consentCheckbox', { v: TERMS_VERSION }),
-      buttonText: L('consentButton', { file: state.file.name }),
+      buttonText: L('consentButton', { file: scopeFiles().map((x) => x.name).join(' + ') }),
       scopeText: scopeText(),
       userAgent: navigator.userAgent,
       recordedWhere: 'local browser only (static site, no server)',
@@ -185,12 +202,30 @@ async function runAnalysis() {
     $('progress-text').textContent = text;
   };
   try {
-    state.fileSha256 = null;
-    if (state.file.size <= MAX_HASH_BYTES) {
-      setProgress({ step: 'hash' });
-      state.fileSha256 = await sha256Hex(new Uint8Array(await state.file.arrayBuffer()));
+    const hash = async (f) => (f.size <= MAX_HASH_BYTES ? sha256Hex(new Uint8Array(await f.arrayBuffer())) : null);
+    setProgress({ step: 'hash' });
+    let first = state.reuseApp ? { result: state.reuseApp, sha: state.fileSha256 } : { result: null, sha: await hash(state.file) };
+    if (!first.result) first.result = await analyzeSource(fileSource(state.file), state.kb, { onProgress: setProgress });
+    state.fileSha256 = first.sha;
+    state.recSha256 = null;
+    state.appResult = null;
+    if (state.recFile) {
+      const second = { result: await analyzeSource(fileSource(state.recFile), state.kb, { onProgress: setProgress }), sha: await hash(state.recFile) };
+      let [app, rec] = [first, second];
+      if (RUNTIME_PLATFORMS.has(app.result.platform) && !RUNTIME_PLATFORMS.has(rec.result.platform)) {
+        [app, rec] = [rec, app];
+        [state.file, state.recFile] = [state.recFile, state.file];
+      }
+      if (RUNTIME_PLATFORMS.has(app.result.platform) || !RUNTIME_PLATFORMS.has(rec.result.platform)) throw new Error('NEED_APP_AND_RECORDING');
+      state.fileSha256 = app.sha;
+      state.recSha256 = rec.sha;
+      state.appResult = app.result;
+      state.result = combineResults(app.result, rec.result, { recordingName: state.recFile.name });
+    } else {
+      state.result = first.result;
+      if (!RUNTIME_PLATFORMS.has(first.result.platform)) state.appResult = first.result;
     }
-    state.result = await analyzeSource(fileSource(state.file), state.kb, { onProgress: setProgress });
+    state.reuseApp = null;
     state.tab = 'risks';
     state.showAllEndpoints = false;
     renderResults();
@@ -228,9 +263,12 @@ function stats(r) {
 }
 
 function tabs() {
-  if (state.result.privacyReport) return ['apps', 'sdks', 'endpoints', 'export'];
-  if (state.result.traffic) return ['risks', 'traffic', 'sdks', 'endpoints', 'policy', 'export'];
-  const list = ['risks', 'sdks', 'permissions', 'endpoints'];
+  const r = state.result;
+  if (r.privacyReport) return ['apps', 'sdks', 'endpoints', 'export'];
+  if (r.traffic && !r.runtime) return ['risks', 'traffic', 'sdks', 'endpoints', 'policy', 'export'];
+  const list = ['risks'];
+  if (r.traffic) list.push('traffic');
+  list.push('sdks', 'permissions', 'endpoints');
   if (isIos()) list.push('declared');
   list.push('details', 'policy', 'export');
   return list;
@@ -257,7 +295,7 @@ function renderResults() {
   $('r-title').innerHTML = `<span class="platform">${esc(platform)}</span>${r.app.name && r.app.name !== id ? `${esc(r.app.name)} ` : ''}<span class="${r.app.name && r.app.name !== id ? 'muted' : ''}">${esc(id)}</span> <span class="muted">${esc(r.app.versionName ?? '')}${r.app.versionCode != null ? ` (${esc(r.app.versionCode)})` : ''}</span>`;
   const minLine = r.privacyReport
     ? L('aprMeta', { from: fmtDate(r.privacyReport.start), to: fmtDate(r.privacyReport.end), n: r.privacyReport.records })
-    : r.traffic
+    : r.traffic && !r.runtime
     ? L('trafficMeta', { packets: r.traffic.packets, s: r.traffic.duration ?? '?', flows: r.traffic.flows })
     : r.platform === 'android'
     ? L('minTarget', { min: r.app.minSdk ?? '?', target: r.app.targetSdk ?? '?' })
@@ -266,6 +304,12 @@ function renderResults() {
   $('r-meta').innerHTML = `${esc(state.file.name)} · ${esc(fmtBytes(state.file.size))} · ${esc(minLine)}<br>
     ${esc(L('fileHash'))}: <code>${esc(state.fileSha256 ?? L('notComputed'))}</code><br>
     ${esc(L('analyzedIn', { s: (r.durationMs / 1000).toFixed(1), v: ANALYZER_VERSION, kb: r.analyzer.kbVersion }))}${r.notice ? `<div class="banner" style="margin-top:12px"><strong>${esc(pick(r.notice))}</strong></div>` : ''}`;
+  const rt = r.runtime;
+  if (rt) $('r-meta').innerHTML += `<br><strong>${esc(L('withRecording'))}</strong> ${esc(rt.recordingName ?? '')} · ${esc(L('recordingMatch', { m: rt.hostsMatchingApp, n: rt.hostsContacted }))}`;
+  $('r-addrec').innerHTML = state.appResult && !rt
+    ? `<div class="card addrec"><div><strong>${esc(L('addRecTitle'))}</strong><p class="muted small" style="margin:4px 0 0">${esc(L('addRecBody'))}</p></div><button type="button" class="btn btn-secondary" id="addrec-btn">${esc(L('addRecButton'))}</button></div>`
+    : '';
+  $('addrec-btn')?.addEventListener('click', () => $('rec-input').click());
   $('r-stats').innerHTML = stats(r).map((s) => `<div class="stat ${s.cls ?? ''}"><div class="n">${s.n}</div><div class="l">${esc(s.l)}</div></div>`).join('');
   const list = tabs();
   if (!list.includes(state.tab)) state.tab = list.includes('apps') ? 'apps' : 'sdks';
@@ -304,7 +348,7 @@ function sdkTable(sdks) {
   return `<div class="table-wrap"><table>
     <thead><tr><th>${esc(L('colSdk'))}</th><th>${esc(L('colCategory'))}</th><th>${esc(L('colCnNexus'))}</th><th>${esc(L('colConfidence'))}</th><th>${esc(L('colEvidence'))}</th></tr></thead>
     <tbody>${sdks.map((s) => `<tr>
-      <td><strong>${esc(pick(s.name))}</strong><div class="sub">${esc(s.vendor)}</div></td>
+      <td><strong>${esc(pick(s.name))}</strong><div class="sub">${esc(s.vendor)}</div>${s.seenAtRuntime ? ` <span class="pill warn">${esc(L(s.runtimeOnly ? 'onlyAtRuntime' : 'seenAtRuntime'))}</span>` : ''}</td>
       <td>${esc(L(`category_${s.category}`))}</td>
       <td>${s.cnNexus ? `<span class="pill cn">CN</span> <span class="sub">${esc(cnText(s.cnNexus))}</span>` : '<span class="muted">—</span>'}</td>
       <td><span class="pill ${s.confidence === 'high' ? 'high' : ''}">${esc(L(`conf_${s.confidence}`))}</span></td>
@@ -655,6 +699,7 @@ function reportObject() {
     disclaimer: { en: t('en', 'disclaimer'), zh: t('zh', 'disclaimer') },
     confirmation: state.consent,
     file: { name: state.file.name, size: state.file.size, sha256: state.fileSha256 },
+    recording: state.recFile ? { name: state.recFile.name, size: state.recFile.size, sha256: state.recSha256 } : null,
     appProfile: inferProfile(state.result),
     result: state.result,
     policyCheck: state.policy,

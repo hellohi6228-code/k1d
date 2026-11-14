@@ -22,6 +22,10 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
   const ga = prof.gaDefaults;
   // Wording found in the app's resources and text files (analyze.js UI_PATTERNS), and how much was readable.
   const ui = r.uiText;
+  // Combined scan (app file + recording): r.runtime is set by combine.js.
+  const rt = r.runtime;
+  const rep = rt?.report; // iPhone App Privacy Report entry for this app
+  const firstMinute = (list) => { const st = prof.consent?.appStart; return st == null ? [] : list.filter((h) => h.relFirst != null && h.relFirst - st <= 60); };
   const cov = r.coverage;
   const quote = (h) => `“${h.text.length > 160 ? `${h.text.slice(0, 157)}…` : h.text}” (${h.source.split('!').pop()})`;
   const readNote = cov ? S(` in the ${cov.textFiles} text files k1d read${cov.encrypted.length ? ` (${cov.encrypted.length} encrypted script file(s) could not be read)` : ''}`, `（共读取 ${cov.textFiles} 个文本文件${cov.encrypted.length ? `，${cov.encrypted.length} 个加密脚本文件无法读取` : ''}）`) : S('', '');
@@ -51,6 +55,10 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
     if (listed.length) signals.push(S(`SDK vendor(s) noted on U.S. government lists in the knowledge base: ${names(listed)} (verify current status).`, `知识库标注列入美国政府名单的 SDK 提供方：${names(listed, 'zh')}（需核实当前状态）。`));
     const prcAi = r.sdks.filter((s) => s.category === 'ai' && s.cnNexus);
     if (prcAi.length) signals.push(S(`AI model endpoints operated by PRC-headquartered companies: ${names(prcAi)}. User prompts may be sent there.`, `由总部在中国的公司运营的 AI 模型接口：${names(prcAi, 'zh')}。用户输入可能被发送至这些接口。`));
+    if (rep) {
+      const cnRep = rep.domains.filter((d) => d.cnIndicators.length);
+      if (cnRep.length) signals.push(S(`The iPhone App Privacy Report shows the app contacted ${cnRep.length} China-linked domain(s) (${cnRep.slice(0, 4).map((d) => `${d.domain} ×${d.hits}`).join(', ')}).`, `iPhone App 隐私报告显示该应用连接了 ${cnRep.length} 个中国关联域名（${cnRep.slice(0, 4).map((d) => `${d.domain} ×${d.hits}`).join('、')}）。`));
+    }
     const cnLive = tHosts.filter((h) => h.cnIndicators.length && h.flows > 0);
     if (cnLive.length) {
       const up = cnLive.reduce((n, h) => n + h.up, 0);
@@ -84,6 +92,8 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
       if (r.capabilities.advertisingId) signals.push(S('Can access the advertising identifier (a persistent identifier under COPPA).', '可访问广告标识符（COPPA 下的持久标识符）。'));
       if (ga.granted.length) signals.push(S(`Ad consent defaults are set to granted in the manifest (${ga.granted.join(', ')}), so ad data can be collected before any age or consent check.`, `清单将广告同意默认值设为“已授予”（${ga.granted.join('、')}），在任何年龄或同意确认之前即可收集广告数据。`));
       const liveTracking = tHosts.filter((h) => h.flows > 0 && sdkHost(h, tracking));
+      const kidsFirstMin = firstMinute(liveTracking);
+      if (kidsFirstMin.length) signals.push(S(`${kidsFirstMin.length} tracking host(s) connected in the app's first 60 seconds, before any age question or consent if the recording followed the k1d guide.`, `${kidsFirstMin.length} 个跟踪主机在应用启动后 60 秒内即连接（如按 k1d 指南录制，此时尚未出现年龄询问或同意）。`));
       if (liveTracking.length) signals.push(S(`At runtime the app contacted ${liveTracking.length} tracking host(s), e.g. ${liveTracking.slice(0, 4).map((h) => h.host).join(', ')}.`, `运行时应用连接了 ${liveTracking.length} 个跟踪主机，如 ${liveTracking.slice(0, 4).map((h) => h.host).join('、')}。`));
       if (['game', 'casino'].includes(ctx.category) && r.capabilities.billing) signals.push(S('Game with in-app purchases: the FTC order against HoYoverse requires parental consent for loot-box purchases by users under 16.', '含应用内购买的游戏：FTC 对 HoYoverse 的命令要求 16 岁以下用户购买抽奖箱须经家长同意。'));
     }
@@ -136,6 +146,19 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
     const replay = sdk('session-replay');
     if (replay.length) signals.push(S(`Session-replay SDK(s) that can record screens and inputs: ${names(replay)}.`, `可录制屏幕和输入的会话回放 SDK：${names(replay, 'zh')}。`));
     if (tracking.length) signals.push(S(`${tracking.length} advertising/analytics/attribution SDK(s): ${names(tracking)}.`, `${tracking.length} 个广告/统计/归因 SDK：${names(tracking, 'zh')}。`));
+    if (rt) {
+      const builtIn = tracking.filter((s) => !s.runtimeOnly);
+      const seen = builtIn.filter((s) => s.seenAtRuntime);
+      const notSeen = builtIn.filter((s) => !s.seenAtRuntime);
+      if (builtIn.length) signals.push(S(`Confirmed by the recording: ${seen.length} of the ${builtIn.length} tracking SDKs built into the app connected to their servers${seen.length ? ` (${names(seen)})` : ''}.`, `录制已确认：应用内置的 ${builtIn.length} 个跟踪 SDK 中有 ${seen.length} 个连接了其服务器${seen.length ? `（${names(seen, 'zh')}）` : ''}。`));
+      if (seen.length && notSeen.length) signals.push(S(`Built in but not seen in this recording (they may connect later or only when an ad is shown): ${names(notSeen)}.`, `已内置但本次录制未出现（可能稍后或仅在展示广告时连接）：${names(notSeen, 'zh')}。`));
+      const extra = tracking.filter((s) => s.runtimeOnly);
+      if (extra.length) signals.push(S(`Seen only in the recording, not found in the app file: ${names(extra)}.`, `仅在录制中出现、应用文件中未发现：${names(extra, 'zh')}。`));
+    }
+    if (rep) {
+      const flagged = rep.domains.filter((d) => d.tracker && d.appInitiated);
+      if (flagged.length) signals.push(S(`Apple flagged ${flagged.length} domain(s) this app contacted as possibly collecting information across apps and websites: ${flagged.slice(0, 6).map((d) => d.domain).join(', ')}.`, `Apple 将该应用连接的 ${flagged.length} 个域名标记为可能跨应用和网站收集信息：${flagged.slice(0, 6).map((d) => d.domain).join('、')}。`));
+    }
     if (r.capabilities.declaresTracking) signals.push(S('Privacy manifests declare tracking.', '隐私清单声明了跟踪。'));
     if (ga.granted.length) signals.push(S(`The manifest sets Google Analytics consent defaults to granted (${ga.granted.join(', ')}); these apply until the app records a user's choice.`, `清单将 Google Analytics 同意默认值设为“已授予”（${ga.granted.join('、')}），在应用记录用户选择前一直适用。`));
     if (ga.collection.length) signals.push(S(`The manifest turns on ${ga.collection.join(', ')}.`, `清单开启了 ${ga.collection.join('、')}。`));
@@ -172,6 +195,8 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
     const loc = permCat('precise_location', 'location');
     const health = permCat('health');
     if (loc.length) signals.push(S(`Location access: ${loc.map((p) => p.name).join(', ')}.`, `位置访问：${loc.map((p) => p.name).join('、')}。`));
+    const repLoc = rep?.access.find((c) => c.category === 'location');
+    if (repLoc) signals.push(S(`Confirmed by the iPhone App Privacy Report: the app used location ${repLoc.count} time(s).`, `iPhone App 隐私报告确认：该应用使用了 ${repLoc.count} 次位置。`));
     if (perm('android.permission.ACCESS_BACKGROUND_LOCATION') || ios?.backgroundModes?.includes('location')) signals.push(S('Background location is requested.', '请求后台定位。'));
     if (health.length) signals.push(S(`Health / fitness / motion access: ${health.map((p) => p.name).join(', ')}.`, `健康/运动/传感器访问：${health.map((p) => p.name).join('、')}。`));
     const locSdks = r.sdks.filter((s) => ['amap', 'baidu_location'].includes(s.id));
@@ -307,6 +332,9 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
     for (const p of r.permissions.filter((x) => x.kind === 'capability' && x.level === 'high' && !['requireAdministrator'].includes(x.name))) {
       const ev = p.evidence ? p.evidence.join(', ') : p.name;
       signals.push(S(`${p.description} (${ev}).`, `${p.description}（${ev}）。`));
+    }
+    for (const c of (rep?.access ?? []).filter((x) => ['camera', 'microphone', 'contacts', 'photos', 'screenRecording'].includes(x.category))) {
+      signals.push(S(`Confirmed by the iPhone App Privacy Report: the app used ${c.category} ${c.count} time(s).`, `iPhone App 隐私报告确认：该应用使用了 ${c.category} ${c.count} 次。`));
     }
     if (perm('requireAdministrator')) signals.push(S('Requires administrator rights on Windows.', '在 Windows 上需要管理员权限。'));
     if (r.platform === 'browser-extension') for (const p of r.permissions.filter((x) => x.level === 'high')) signals.push(S(`Extension permission: ${p.name}.`, `扩展权限：${p.name}。`));
