@@ -265,6 +265,8 @@ export function summarizeManifest(root) {
       allowBackup: app.attrs.allowBackup === undefined ? null : app.attrs.allowBackup === true,
       usesCleartextTraffic: app.attrs.usesCleartextTraffic === undefined ? null : app.attrs.usesCleartextTraffic === true,
       networkSecurityConfig: app.attrs.networkSecurityConfig ?? null,
+      appCategory: app.attrs.appCategory ?? null,
+      isGame: app.attrs.isGame === true || app.attrs.isGame === 'true',
     },
     components,
     metaData,

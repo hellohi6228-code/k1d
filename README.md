@@ -37,6 +37,8 @@ k1d reads an app or installer **in your browser** and shows what's inside it. It
   - disclosures vs. behavior
   - foreign-adversary-controlled apps (PAFACA)
 
+  No input is needed: the app type (game, video, AI, casino, …), the likely audience (children, mixed, general) and Google Analytics consent defaults are inferred from the file, and each inference shows its evidence. Store launchers that do not contain the app (for example the Google Play Games installer) are identified as such.
+
   These are draft notes, not legal conclusions.
 - **SDKs (104 in the knowledge base).** Includes China-origin ad, analytics and push SDKs, face/voice biometric SDKs, session replay, video players, AI model APIs (US and PRC), age-assurance APIs, and PC game services and anti-cheat. Each comes with evidence and a confidence level.
 - **Data access.**
@@ -45,7 +47,7 @@ k1d reads an app or installer **in your browser** and shows what's inside it. It
   - Windows capability APIs (keyboard hooks, credential access, hardware IDs, …) and admin rights.
   - MSIX capabilities, HarmonyOS permissions, extension permissions, mini-program APIs and scopes.
 - **Declared data (iOS/macOS).** Privacy manifests from the app and every SDK.
-- **Network traffic (from a capture).** Every host the app contacted, when it was first contacted, bytes sent and received, and protocol. Host names come from DNS and TLS SNI; QUIC is named via DNS. Plain-HTTP requests are shown in full and scanned for credentials. Enter the second when you accepted the app's terms, and hosts contacted before that point are marked and feed the risk areas. Encrypted contents are not decrypted.
+- **Network traffic (from a capture).** Every host the app contacted, when it was first contacted, bytes sent and received, and protocol. Host names come from DNS and TLS SNI; QUIC is named via DNS. Plain-HTTP requests are shown in full and scanned for credentials. The consent moment is found automatically (first contact with a consent-management service such as Google UMP); hosts contacted before it are marked and feed the risk areas. Encrypted contents are not decrypted.
 - **Endpoints.** Hosts on PRC clouds and `.cn` domains are flagged, as are cleartext connections.
 - **Hard-coded credentials.** AWS, Alibaba Cloud, Tencent Cloud, private keys, GitHub, Slack, Stripe, FCM and OpenAI-style keys. Values are always masked.
 - **Signing.** APK v1–v3, iOS/macOS code signing (Team ID, entitlements), Authenticode (signer chosen by serial number), MSIX, pkg.

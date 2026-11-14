@@ -29,6 +29,7 @@ for (const c of CASES) {
     assert.equal(r.app.name, c.product);
     if (c.version) assert.equal(r.app.versionName, c.version);
     assert.ok(!r.endpoints.some((e) => /\.(com|net|org)\d/.test(e.host)), 'no DER junk glued to hosts');
+    assert.equal(!!r.notice, c.product === 'Google Play Games', 'installer stubs say they are not the app');
   });
 }
 

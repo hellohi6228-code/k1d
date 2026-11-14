@@ -3,13 +3,23 @@
 // never a verdict. Each area lists the signals found, why the area may matter, public references,
 // and what to verify next (usually at runtime).
 
+import { inferProfile } from './profile.js';
+
 const TRACKING = new Set(['ads', 'analytics', 'attribution']);
 const S = (en, zh) => ({ en, zh });
 const names = (list, lang = 'en') => list.map((s) => s.name[lang]).join(lang === 'zh' ? '、' : ', ');
 
 export const CONTEXT_CATEGORIES = ['game', 'casino', 'video', 'ai', 'social', 'utility', 'ecommerce', 'health', 'education', 'other'];
 
-export function buildRisks(r, ctx, policy) {
+// ctxIn may override the automatic profile (tests use this); the app passes nothing.
+export function buildRisks(r, ctxIn = {}, policy = null) {
+  const prof = inferProfile(r);
+  const ctx = { category: prof.category, audience: prof.audience, consentAt: prof.consent?.at ?? null, ...ctxIn };
+  if (ctxIn.childDirected === true) ctx.audience = 'child';
+  const consentWhen = ctxIn.consentAt != null || !prof.consent?.service
+    ? S(`before the consent time (${ctx.consentAt}s)`, `在同意时间（${ctx.consentAt} 秒）之前`)
+    : S(`before the consent service (${prof.consent.service}) was first contacted at ${ctx.consentAt}s`, `在同意管理服务（${prof.consent.service}）于第 ${ctx.consentAt} 秒首次连接之前`);
+  const ga = prof.gaDefaults;
   const areas = [];
   const sdk = (cat) => r.sdks.filter((s) => s.category === cat && s.confidence !== 'low');
   const tracking = r.sdks.filter((s) => TRACKING.has(s.category) && s.confidence !== 'low');
@@ -41,7 +51,7 @@ export function buildRisks(r, ctx, policy) {
       const up = cnLive.reduce((n, h) => n + h.up, 0);
       signals.push(S(`At runtime the device connected to ${cnLive.length} host(s) with China-nexus indicators and sent ${kb(up)} to them (${cnLive.slice(0, 4).map((h) => h.host).join(', ')}).`, `运行时设备连接了 ${cnLive.length} 个带中国关联指标的主机，并向其发送了 ${kb(up)}（${cnLive.slice(0, 4).map((h) => h.host).join('、')}）。`));
       const pre = cnLive.filter(before);
-      if (pre.length) signals.push(S(`${pre.length} of them were contacted before the consent time you entered (${ctx.consentAt}s): ${pre.slice(0, 4).map((h) => h.host).join(', ')}.`, `其中 ${pre.length} 个在您填写的同意时间（${ctx.consentAt} 秒）之前即被连接：${pre.slice(0, 4).map((h) => h.host).join('、')}。`));
+      if (pre.length) signals.push(S(`${pre.length} of them were contacted ${consentWhen.en}: ${pre.slice(0, 4).map((h) => h.host).join(', ')}.`, `其中 ${pre.length} 个${consentWhen.zh}即被连接：${pre.slice(0, 4).map((h) => h.host).join('、')}。`));
     }
     areas.push({
       id: 'foreign_data', title: S('Data transfers to countries of concern', '向受关注国家传输数据'), signals,
@@ -56,18 +66,27 @@ export function buildRisks(r, ctx, policy) {
     });
   }
 
-  // 2 ── Children and teens
+  // 2 ── Children and teens (audience inferred automatically, see profile.js)
   {
     const signals = [];
     const ageSignals = r.sdks.filter((s) => s.category === 'age-assurance');
-    if (ctx.childDirected && tracking.length) signals.push(S(`Marked child-directed or mixed-audience, with ${tracking.length} advertising/analytics/attribution SDK(s): ${names(tracking)}.`, `标记为面向儿童或混合受众，且包含 ${tracking.length} 个广告/统计/归因 SDK：${names(tracking, 'zh')}。`));
-    if (ctx.childDirected && r.capabilities.advertisingId) signals.push(S('Can access the advertising identifier (a persistent identifier under COPPA).', '可访问广告标识符（COPPA 下的持久标识符）。'));
-    if (ctx.childDirected && ['game', 'casino'].includes(ctx.category) && r.capabilities.billing) signals.push(S('Game with in-app purchases: the FTC order against HoYoverse requires parental consent for loot-box purchases by users under 16.', '含应用内购买的游戏：FTC 对 HoYoverse 的命令要求 16 岁以下用户购买抽奖箱须经家长同意。'));
-    signals.push(ageSignals.length
+    const kidsAudience = ctx.audience === 'child' || ctx.audience === 'mixed';
+    const basis = [...prof.audienceBasis, ...prof.categoryBasis].slice(0, 3);
+    if (ctx.audience === 'child') signals.push(S(`Likely directed to children. ${basis.map((b) => b.en).join(' ')}`.trim(), `可能面向儿童。${basis.map((b) => b.zh).join('')}`));
+    else if (ctx.audience === 'mixed') signals.push(S(`Likely mixed audience including children and teens. ${basis.map((b) => b.en).join(' ')}`.trim(), `受众可能包含儿童和青少年。${basis.map((b) => b.zh).join('')}`));
+    if (kidsAudience) {
+      if (tracking.length) signals.push(S(`${tracking.length} advertising/analytics/attribution SDK(s): ${names(tracking)}.`, `${tracking.length} 个广告/统计/归因 SDK：${names(tracking, 'zh')}。`));
+      if (r.capabilities.advertisingId) signals.push(S('Can access the advertising identifier (a persistent identifier under COPPA).', '可访问广告标识符（COPPA 下的持久标识符）。'));
+      if (ga.granted.length) signals.push(S(`Ad consent defaults are set to granted in the manifest (${ga.granted.join(', ')}), so ad data can be collected before any age or consent check.`, `清单将广告同意默认值设为“已授予”（${ga.granted.join('、')}），在任何年龄或同意确认之前即可收集广告数据。`));
+      const liveTracking = tHosts.filter((h) => h.flows > 0 && sdkHost(h, tracking));
+      if (liveTracking.length) signals.push(S(`At runtime the app contacted ${liveTracking.length} tracking host(s), e.g. ${liveTracking.slice(0, 4).map((h) => h.host).join(', ')}.`, `运行时应用连接了 ${liveTracking.length} 个跟踪主机，如 ${liveTracking.slice(0, 4).map((h) => h.host).join('、')}。`));
+      if (['game', 'casino'].includes(ctx.category) && r.capabilities.billing) signals.push(S('Game with in-app purchases: the FTC order against HoYoverse requires parental consent for loot-box purchases by users under 16.', '含应用内购买的游戏：FTC 对 HoYoverse 的命令要求 16 岁以下用户购买抽奖箱须经家长同意。'));
+    }
+    if (!r.traffic || ageSignals.length) signals.push(ageSignals.length
       ? S(`Platform age-signal API present: ${names(ageSignals)}.`, `存在平台年龄信号 API：${names(ageSignals, 'zh')}。`)
       : S('No platform age-signal API found (Google Play Age Signals / Apple Declared Age Range).', '未发现平台年龄信号 API（Google Play Age Signals / Apple Declared Age Range）。'));
     areas.push({
-      id: 'children', title: S('Children and teens', '儿童与青少年'), signals, needsContext: !ctx.childDirected,
+      id: 'children', title: S('Children and teens', '儿童与青少年'), signals, attention: kidsAudience,
       why: S('The amended COPPA Rule (deadline Apr 22, 2026) covers persistent identifiers collected by operators and integrated third parties. The FTC settled with HoYoverse (Genshin Impact) for $20M in Jan 2025 over COPPA and loot boxes. Texas sued TikTok under the SCOPE Act (Oct 2024) and won a DTPA ruling in Sep 2026. Texas\'s app-store age law was preliminarily enjoined in Dec 2025; similar laws exist in Utah, Louisiana and Alabama.',
         '修订后的 COPPA 规则（截止日期 2026 年 4 月 22 日）涵盖运营者及其集成的第三方收集的持久标识符。FTC 于 2025 年 1 月就 COPPA 和抽奖箱问题与 HoYoverse（原神）以 2000 万美元和解。德州依据 SCOPE 法案起诉 TikTok（2024 年 10 月），并于 2026 年 9 月获得 DTPA 裁决。德州应用商店年龄法于 2025 年 12 月被初步禁止执行；犹他、路易斯安那和阿拉巴马有类似法律。'),
       refs: [
@@ -109,11 +128,18 @@ export function buildRisks(r, ctx, policy) {
     if (replay.length) signals.push(S(`Session-replay SDK(s) that can record screens and inputs: ${names(replay)}.`, `可录制屏幕和输入的会话回放 SDK：${names(replay, 'zh')}。`));
     if (tracking.length) signals.push(S(`${tracking.length} advertising/analytics/attribution SDK(s): ${names(tracking)}.`, `${tracking.length} 个广告/统计/归因 SDK：${names(tracking, 'zh')}。`));
     if (r.capabilities.declaresTracking) signals.push(S('Privacy manifests declare tracking.', '隐私清单声明了跟踪。'));
+    if (ga.granted.length) signals.push(S(`The manifest sets Google Analytics consent defaults to granted (${ga.granted.join(', ')}); these apply until the app records a user's choice.`, `清单将 Google Analytics 同意默认值设为“已授予”（${ga.granted.join('、')}），在应用记录用户选择前一直适用。`));
+    if (ga.collection.length) signals.push(S(`The manifest turns on ${ga.collection.join(', ')}.`, `清单开启了 ${ga.collection.join('、')}。`));
     if (tHosts.length) {
       const live = tHosts.filter((h) => h.flows > 0 && sdkHost(h, tracking));
       if (live.length) signals.push(S(`Tracking SDK hosts contacted at runtime: ${live.slice(0, 6).map((h) => h.host).join(', ')}.`, `运行时连接的跟踪 SDK 主机：${live.slice(0, 6).map((h) => h.host).join('、')}。`));
       const pre = live.filter(before);
-      if (pre.length) signals.push(S(`${pre.length} tracking host(s) were contacted before the consent time you entered (${ctx.consentAt}s): ${pre.slice(0, 6).map((h) => h.host).join(', ')}.`, `${pre.length} 个跟踪主机在您填写的同意时间（${ctx.consentAt} 秒）之前即被连接：${pre.slice(0, 6).map((h) => h.host).join('、')}。`));
+      if (pre.length) signals.push(S(`${pre.length} tracking host(s) were contacted ${consentWhen.en}: ${pre.slice(0, 6).map((h) => h.host).join(', ')}.`, `${pre.length} 个跟踪主机${consentWhen.zh}即被连接：${pre.slice(0, 6).map((h) => h.host).join('、')}。`));
+      if (live.length && ctx.consentAt == null && prof.consent) {
+        const first = Math.min(...live.map((h) => h.relFirst ?? Infinity));
+        const after = prof.consent.appStart != null && Number.isFinite(first) ? Math.max(0, +(first - prof.consent.appStart).toFixed(1)) : null;
+        signals.push(S(`No consent-management service was contacted during the capture${after != null ? `; the first tracking host was contacted ${after}s after the app's first connection` : ''}.`, `抓包期间未连接任何同意管理服务${after != null ? `；首个跟踪主机在应用首次联网后 ${after} 秒即被连接` : ''}。`));
+      }
     }
     areas.push({
       id: 'wiretap', title: S('Wiretap and pen-register claims (tracking SDKs)', '窃听与“笔式记录器”诉讼（跟踪 SDK）'), signals,
@@ -161,11 +187,10 @@ export function buildRisks(r, ctx, policy) {
     const vodPlayers = players.filter((p) => VOD.has(p.id));
     const videoApp = ['video', 'social'].includes(ctx.category);
     const relevant = videoApp || vodPlayers.length > 0;
-    if (players.length) signals.push(S(`Video player SDK(s): ${names(players)}.`, `视频播放 SDK：${names(players, 'zh')}。`));
+    if (players.length && relevant) signals.push(S(`Video player SDK(s): ${names(players)}.`, `视频播放 SDK：${names(players, 'zh')}。`));
     if (relevant && tracking.length) signals.push(S(`Video playback plus ${tracking.length} tracking SDK(s) (${names(tracking)}).`, `视频播放同时包含 ${tracking.length} 个跟踪 SDK（${names(tracking, 'zh')}）。`));
-    if (players.length && !relevant) signals.push(S('In a non-video app a general-purpose player is often used for video ads; set the category to Video if users watch shows here.', '在非视频类应用中，通用播放器通常用于视频广告；如用户在此观看节目，请将类别设为“视频”。'));
     areas.push({
-      id: 'vppa', title: S('Video viewing data (VPPA)', '视频观看数据（VPPA）'), signals, needsContext: !relevant,
+      id: 'vppa', title: S('Video viewing data (VPPA)', '视频观看数据（VPPA）'), signals,
       why: S('The Video Privacy Protection Act (18 U.S.C. § 2710; $2,500 liquidated damages per person) has been used against apps that send what a user watched together with a persistent identifier to ad or analytics partners. Short-drama and video apps fit this pattern.',
         '《视频隐私保护法》（18 U.S.C. § 2710；每人 2500 美元约定赔偿）曾被用于起诉将用户观看内容与持久标识符一并发送给广告或统计合作方的应用。短剧和视频应用符合这一模式。'),
       refs: [['18 U.S.C. § 2710 (Cornell LII)', 'https://www.law.cornell.edu/uscode/text/18/2710']],
@@ -192,7 +217,7 @@ export function buildRisks(r, ctx, policy) {
     const gameish = ['game', 'casino'].includes(ctx.category);
     if (gameish && r.capabilities.billing) signals.push(S(`${ctx.category === 'casino' ? 'Social-casino' : 'Game'} app with in-app purchases (virtual currency / loot boxes possible).`, `${ctx.category === 'casino' ? '社交博彩' : '游戏'}应用含应用内购买（可能涉及虚拟货币/抽奖箱）。`));
     areas.push({
-      id: 'gambling', title: S('Loot boxes, virtual currency, social casino', '抽奖箱、虚拟货币与社交博彩'), signals, needsContext: !gameish,
+      id: 'gambling', title: S('Loot boxes, virtual currency, social casino', '抽奖箱、虚拟货币与社交博彩'), signals,
       why: S('Washington\'s gambling-loss recovery law drives class actions against social-casino apps: a $24.9M jury verdict against High 5 Games (Feb 2025) and a proposed $201M judgment in Horn v. Amazon (Jul 2026). The FTC\'s HoYoverse order covers loot-box odds disclosure and virtual-currency practices.',
         '华盛顿州赌博损失追偿法推动了针对社交博彩应用的集体诉讼：High 5 Games 案陪审团裁定 2490 万美元（2025 年 2 月），Horn v. Amazon 案拟议判决 2.01 亿美元（2026 年 7 月）。FTC 对 HoYoverse 的命令涉及抽奖箱概率披露和虚拟货币做法。'),
       refs: [
@@ -208,9 +233,8 @@ export function buildRisks(r, ctx, policy) {
     const signals = [];
     const ai = sdk('ai');
     if (ai.length) signals.push(S(`AI model API(s) referenced: ${names(ai)}.`, `引用的 AI 模型 API：${names(ai, 'zh')}。`));
-    if (ctx.category === 'ai' && !ai.length) signals.push(S('Marked as an AI app; no known model API endpoint found in the file (it may use its own servers).', '标记为 AI 应用；文件中未发现已知模型 API 接口（可能使用自有服务器）。'));
     areas.push({
-      id: 'ai', title: S('AI companions and chatbots', 'AI 陪伴与聊天机器人'), signals, needsContext: !ai.length && ctx.category !== 'ai',
+      id: 'ai', title: S('AI companions and chatbots', 'AI 陪伴与聊天机器人'), signals,
       why: S('California SB 243 (in force Jan 1, 2026) requires companion chatbots to disclose they are AI, give minors break reminders, and allows private lawsuits. The FTC opened a 6(b) study of AI companions and minors (Sep 2025), and the Texas AG sent civil investigative demands to AI chatbot companies (Aug 2025).',
         '加州 SB 243（2026 年 1 月 1 日生效）要求陪伴型聊天机器人披露其为 AI、向未成年人发出休息提醒，并允许私人诉讼。FTC 于 2025 年 9 月启动针对 AI 陪伴与未成年人的 6(b) 研究，德州检察长于 2025 年 8 月向 AI 聊天公司发出民事调查要求。'),
       refs: [
@@ -291,11 +315,11 @@ export function buildRisks(r, ctx, policy) {
     }
     if (r.capabilities.declaresTracking && !r.capabilities.trackingPrompt && r.platform === 'ios') signals.push(S('Privacy manifests declare tracking but the app has no App Tracking Transparency prompt text.', '隐私清单声明了跟踪，但应用没有 App Tracking Transparency 提示文字。'));
     areas.push({
-      id: 'disclosures', title: S('Disclosures vs. what the app contains', '披露内容与应用实际包含内容'), signals, needsContext: !policy,
+      id: 'disclosures', title: S('Disclosures vs. what the app contains', '披露内容与应用实际包含内容'), signals,
       why: S('Most state AG cases against China-linked apps are UDAP claims built on gaps between what the app does and what its policy or store labels say (FTC Act § 5 and state consumer-protection acts).',
         '各州检察长针对中国关联应用的案件大多为 UDAP 主张，依据是应用实际行为与隐私政策或商店标签之间的差异（FTC 法第 5 条及各州消费者保护法）。'),
       refs: [['Texas AG settlement with Temu', 'https://www.texasattorneygeneral.gov/news/releases/attorney-general-paxton-secures-first-its-kind-settlement-temu-protect-texans-data-ccp-and-protect']],
-      next: S('Paste the privacy policy in the Privacy policy check tab, and compare with the App Store privacy label / Google Play Data Safety form.', '在“隐私政策对照”中粘贴隐私政策，并与 App Store 隐私标签 / Google Play 数据安全表单对照。'),
+      next: S('Compare these findings with the app\'s privacy policy and its App Store privacy label / Google Play Data Safety form.', '将这些发现与应用的隐私政策及 App Store 隐私标签 / Google Play 数据安全表单对照。'),
     });
   }
 
@@ -304,7 +328,7 @@ export function buildRisks(r, ctx, policy) {
     const signals = [];
     if (['social', 'video'].includes(ctx.category)) signals.push(S('Social / video app with China-nexus indicators.', '带有中国关联指标的社交/视频应用。'));
     areas.push({
-      id: 'pafaca', title: S('Foreign-adversary-controlled apps law', '外国对手控制应用法'), signals, needsContext: !['social', 'video'].includes(ctx.category),
+      id: 'pafaca', title: S('Foreign-adversary-controlled apps law', '外国对手控制应用法'), signals,
       why: S('The Protecting Americans from Foreign Adversary Controlled Applications Act (2024) names ByteDance/TikTok and lets the President designate other social apps controlled by a foreign adversary that meet user thresholds. Ownership structure, not the code, decides coverage.',
         '《保护美国人免受外国对手控制应用法》（2024）点名字节跳动/TikTok，并允许总统指定其他符合用户规模门槛、受外国对手控制的社交应用。是否适用取决于股权结构，而非代码。'),
       refs: [['PAFACA text (Congress.gov, H.R. 7521)', 'https://www.congress.gov/bill/118th-congress/house-bill/7521']],
@@ -312,10 +336,7 @@ export function buildRisks(r, ctx, policy) {
     });
   }
 
-  for (const a of areas) a.status = a.signals.length ? (a.needsContext ? 'context' : 'signals') : a.needsContext ? 'context' : 'none';
-  // Children area always has the age-signal line; only "signals" when other lines exist too.
-  const ch = areas.find((a) => a.id === 'children');
-  if (ch && !ctx.childDirected) ch.status = 'context';
+  for (const a of areas) a.status = (a.attention ?? a.signals.length > 0) ? 'signals' : 'none';
   const order = { signals: 0, context: 1, none: 2 };
   areas.sort((a, b) => order[a.status] - order[b.status]);
   return areas;

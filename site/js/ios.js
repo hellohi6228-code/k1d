@@ -102,6 +102,7 @@ export async function collectApple(zip, facts, { addUrls, scanText, progress, bu
     signingIdentifier: null,
     provisioning: null,
     storeMetadata: null,
+    appCategory: info.LSApplicationCategoryType ? String(info.LSApplicationCategoryType) : null,
     sandboxed: null,
     electron: false,
   };
@@ -249,7 +250,7 @@ export async function collectApple(zip, facts, { addUrls, scanText, progress, bu
   const metaEntry = zip.byName.get('iTunesMetadata.plist');
   if (metaEntry) {
     const md = await readPlist(metaEntry.name);
-    if (md) ios.storeMetadata = { artistName: md.artistName ?? null, itemName: md.itemName ?? md.playlistName ?? null, itemId: md.itemId ?? null, genre: md.genre ?? null, releaseDate: md.releaseDate ?? null, bundleId: md.softwareVersionBundleId ?? null };
+    if (md) ios.storeMetadata = { artistName: md.artistName ?? null, itemName: md.itemName ?? md.playlistName ?? null, itemId: md.itemId ?? null, genre: md.genre ?? null, rating: md.rating?.label ?? null, releaseDate: md.releaseDate ?? null, bundleId: md.softwareVersionBundleId ?? null };
   }
   if (ios.entitlements) {
     const ent = ios.entitlements;

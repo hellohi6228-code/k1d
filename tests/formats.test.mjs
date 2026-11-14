@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { analyzeSource } from '../site/js/analyze.js';
 import { bytesSource } from '../site/js/zip.js';
 import { buildRisks } from '../site/js/risks.js';
+import { inferProfile } from '../site/js/profile.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const readJson = (p) => JSON.parse(fs.readFileSync(path.join(root, p), 'utf8'));
@@ -131,21 +132,36 @@ test('Electron app.asar: package.json, npm packages, credentials', async () => {
   assert.ok(secretTypes(r).includes('aws_access_key'));
 });
 
-test('risk areas: signals, context prompts and references', async () => {
+test('risk areas: automatic profile, signals and references (no user input)', async () => {
   const r = await scan('IdleQuestSetup.exe');
-  const areas = buildRisks(r, { category: 'game', childDirected: false }, null);
+  const prof = inferProfile(r);
+  assert.equal(prof.category, 'game', 'Steamworks / anti-cheat mean a game');
+  assert.equal(prof.audience, 'mixed');
+  const areas = buildRisks(r);
   const by = Object.fromEntries(areas.map((a) => [a.id, a]));
   assert.equal(by.security.status, 'signals');
   assert.ok(by.security.signals.some((s) => s.en.includes('Alibaba Cloud AccessKey ID')));
   assert.equal(by.intrusive.status, 'signals');
   assert.equal(by.ai.status, 'signals');
-  assert.equal(by.children.status, 'context');
-  assert.equal(by.disclosures.status, 'context');
+  assert.equal(by.children.status, 'signals', 'games are treated as possibly having child users');
+  assert.match(by.children.signals[0].en, /^Likely mixed audience/);
   for (const a of areas) {
+    assert.ok(['signals', 'none'].includes(a.status), `${a.id}: no status asks for input`);
     assert.ok(a.refs.length >= 1, `${a.id} has references`);
     for (const [, url] of a.refs) assert.match(url, /^https:\/\//);
     assert.ok(a.why.en && a.why.zh && a.next.en && a.next.zh, `${a.id} bilingual`);
   }
-  const kid = buildRisks(r, { category: 'game', childDirected: true }, null).find((a) => a.id === 'children');
-  assert.equal(kid.status, 'signals');
 });
+
+test('automatic profile: kids keywords, manifest category, consent defaults', () => {
+  const base = { sdks: [], permissions: [], capabilities: {}, endpoints: [] };
+  const kids = inferProfile({ ...base, app: { id: 'com.studio.babyshark.abc', name: null } });
+  assert.equal(kids.audience, 'child');
+  assert.equal(inferProfile({ ...base, app: { id: 'com.acme.schedule', name: null } }).category, 'other', '"edu" inside "schedule" is not a match');
+  const vid = inferProfile({ ...base, app: { id: 'x.y' }, android: { application: { appCategory: 2 }, metaData: [] } });
+  assert.equal(vid.category, 'video');
+  const ga = inferProfile({ ...base, app: { id: 'x.y' }, android: { application: {}, metaData: [{ name: 'google_analytics_default_allow_ad_storage', value: 'true' }, { name: 'google_analytics_default_allow_analytics_storage', value: 'false' }] } });
+  assert.deepEqual(ga.gaDefaults.granted, ['ad storage']);
+  assert.deepEqual(ga.gaDefaults.denied, ['analytics storage']);
+});
+

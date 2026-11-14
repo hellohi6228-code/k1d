@@ -196,3 +196,6 @@ textarea.policy { width: 100%; min-height: 200px; resize: vertical; }
 .note.risk-none { border-left: 4px solid var(--ok); }
 .note h4 { margin-top: 12px; }
 .note .cite a { color: var(--accent); }
+.how { margin-top: 18px; }
+.how .kv dt { font-weight: 600; color: var(--text, inherit); }
+@media (max-width: 560px) { .how .kv { grid-template-columns: 1fr; } .how .kv dd { margin-bottom: 8px; } }

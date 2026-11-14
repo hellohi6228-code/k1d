@@ -3,7 +3,8 @@ import { fileSource } from './zip.js';
 import { sha256Hex } from './cert.js';
 import { TERMS, TERMS_VERSION, t } from './i18n.js';
 import { checkPolicy } from './policy.js';
-import { buildRisks, LIMITATIONS, CONTEXT_CATEGORIES } from './risks.js';
+import { buildRisks, LIMITATIONS } from './risks.js';
+import { inferProfile, SYSTEM_HOSTS } from './profile.js';
 
 const MAX_HASH_BYTES = 512 * 1024 * 1024;
 const $ = (id) => document.getElementById(id);
@@ -19,7 +20,6 @@ const state = {
   consent: null,
   fileSha256: null,
   result: null,
-  context: { category: 'other', childDirected: false },
   policyText: '',
   policy: null,
   tab: 'sdks',
@@ -217,7 +217,7 @@ function tabCount(tab) {
 }
 
 function currentRisks() {
-  return buildRisks(state.result, state.context, state.policy);
+  return buildRisks(state.result, {}, state.policy);
 }
 
 function renderResults() {
@@ -233,7 +233,7 @@ function renderResults() {
       : r.app.publisher ? `${L('publisher')}: ${r.app.publisher}` : '';
   $('r-meta').innerHTML = `${esc(state.file.name)} · ${esc(fmtBytes(state.file.size))} · ${esc(minLine)}<br>
     ${esc(L('fileHash'))}: <code>${esc(state.fileSha256 ?? L('notComputed'))}</code><br>
-    ${esc(L('analyzedIn', { s: (r.durationMs / 1000).toFixed(1), v: ANALYZER_VERSION, kb: r.analyzer.kbVersion }))}`;
+    ${esc(L('analyzedIn', { s: (r.durationMs / 1000).toFixed(1), v: ANALYZER_VERSION, kb: r.analyzer.kbVersion }))}${r.notice ? `<div class="banner" style="margin-top:12px"><strong>${esc(pick(r.notice))}</strong></div>` : ''}`;
   $('r-stats').innerHTML = stats(r).map((s) => `<div class="stat ${s.cls ?? ''}"><div class="n">${s.n}</div><div class="l">${esc(s.l)}</div></div>`).join('');
   const list = tabs();
   if (!list.includes(state.tab)) state.tab = 'sdks';
@@ -453,12 +453,17 @@ function secretsCard() {
 }
 
 const fmtKB = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${(n / 1024).toFixed(1)} KB`);
-const SYSTEM_HOSTS = /(^|\.)(gstatic\.com|android\.apis\.google\.com|play\.googleapis\.com|android\.clients\.google\.com|connectivitycheck\.|mtalk\.google\.com|time\.android\.com|googleapis\.com)$/;
 
-function consentInput() {
-  return `<div class="card"><label class="context">${esc(L('consentAtLabel'))}
-    <input type="number" min="0" step="1" id="ctx-consent" style="width:110px" value="${state.context.consentAt ?? ''}" placeholder="${esc(L('seconds'))}"></label>
-    <p class="muted small" style="margin:8px 0 0">${esc(L('consentAtNote'))}</p></div>`;
+// Read-only summary of what was inferred automatically (profile.js), with the evidence.
+function profileCard() {
+  const p = inferProfile(state.result);
+  const basis = (list) => list.length ? `<div class="sub">${list.slice(0, 3).map((b) => esc(pick(b))).join(' ')}</div>` : '';
+  const rows = [
+    [L('autoCategory'), L(`cat_${p.category}`), p.categoryBasis],
+    [L('autoAudience'), L(`audience_${p.audience}`), p.audienceBasis],
+  ];
+  if (p.consent) rows.push([L('autoConsent'), p.consent.at != null ? L('consentSeen', { s: p.consent.at, service: p.consent.service }) : L('consentNotSeen'), []]);
+  return `<div class="card"><h3>${esc(L('autoTitle'))}</h3><dl class="kv">${rows.map(([k, v, b]) => `<dt>${esc(k)}</dt><dd>${esc(v)}${basis(b)}</dd>`).join('')}</dl></div>`;
 }
 
 function panelTraffic() {
@@ -466,14 +471,14 @@ function panelTraffic() {
   const sdkFor = new Map();
   for (const s of state.result.sdks) for (const e of s.evidence) if (e.type === 'traffic') for (const h of e.samples) sdkFor.set(h, pick(s.name));
   const rows = t.hosts.filter((h) => h.flows > 0 || h.protocols.includes('DNS only'));
-  const cAt = state.context.consentAt;
+  const cAt = inferProfile(state.result).consent?.at ?? null;
   return `<div class="stats">
       <div class="stat"><div class="n">${t.hosts.filter((h) => h.flows > 0).length}</div><div class="l">${esc(L('hostsContacted'))}</div></div>
       <div class="stat ${t.hosts.some((h) => h.cnIndicators.length && h.flows) ? 'cn' : ''}"><div class="n">${t.hosts.filter((h) => h.cnIndicators.length && h.flows).length}</div><div class="l">${esc(L('cnHostsContacted'))}</div></div>
       <div class="stat"><div class="n">${esc(fmtKB(t.upTotal))}</div><div class="l">${esc(L('bytesSent'))}</div></div>
       <div class="stat"><div class="n">${esc(fmtKB(t.downTotal))}</div><div class="l">${esc(L('bytesReceived'))}</div></div>
     </div>
-    ${consentInput()}
+    ${profileCard()}
     <p class="note-line">${esc(L('trafficNote'))}</p>
     <div class="table-wrap"><table>
     <thead><tr><th>${esc(L('colFirstSeen'))}</th><th>${esc(L('colHost'))}</th><th>${esc(L('colOperator'))}</th><th>${esc(L('colProtocol'))}</th><th>${esc(L('colSent'))}</th><th>${esc(L('colReceived'))}</th></tr></thead>
@@ -530,12 +535,12 @@ function limitationsHtml() {
     <ul class="list-plain">${LIMITATIONS[state.lang].map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`;
 }
 
-const STATUS_PILL = { signals: 'warn', context: '', none: 'ok' };
+const STATUS_PILL = { signals: 'warn', none: 'ok' };
 
 function risksHtml(areas) {
   return areas.map((a) => `<article class="note risk-${a.status}">
       <div class="risk-head"><h3>${esc(pick(a.title))}</h3><span class="pill ${STATUS_PILL[a.status]}">${esc(L(`status_${a.status}`))}</span></div>
-      ${a.signals.length ? `<h4>${esc(L('observation'))}</h4><ul class="list-plain">${a.signals.map((s) => `<li>${esc(pick(s))}</li>`).join('')}</ul>` : `<p class="muted small">${esc(L(a.status === 'context' ? 'riskNeedsContext' : 'riskNone'))}</p>`}
+      ${a.signals.length ? `<h4>${esc(L('observation'))}</h4><ul class="list-plain">${a.signals.map((s) => `<li>${esc(pick(s))}</li>`).join('')}</ul>` : `<p class="muted small">${esc(L('riskNone'))}</p>`}
       <h4>${esc(L('whyMatters'))}</h4><p>${esc(pick(a.why))}</p>
       <h4>${esc(L('verifyNext'))}</h4><p>${esc(pick(a.next))}</p>
       <p class="cite">${a.refs.map(([label, url]) => `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`).join(' · ')}</p>
@@ -546,11 +551,7 @@ function panelRisks() {
   const areas = currentRisks();
   const n = areas.filter((a) => a.status === 'signals').length;
   return `<div class="banner">${esc(L('notesBanner'))}</div>
-    <div class="card"><h3>${esc(L('contextTitle'))}</h3><div class="context">
-      <label>${esc(L('category'))} <select id="ctx-category">${CONTEXT_CATEGORIES.map((c) => `<option value="${c}" ${state.context.category === c ? 'selected' : ''}>${esc(L(`cat_${c}`))}</option>`).join('')}</select></label>
-      <label><input type="checkbox" id="ctx-child" ${state.context.childDirected ? 'checked' : ''}> ${esc(L('childDirected'))}</label>
-    </div></div>
-    ${state.result.traffic ? consentInput() : ''}
+    ${profileCard()}
     <p class="note-line">${esc(L('riskSummary', { n, total: areas.length }))}</p>
     ${risksHtml(areas)}
     ${limitationsHtml()}`;
@@ -582,9 +583,6 @@ function bindPanel() {
     renderResults();
   });
   $('policy-text')?.addEventListener('input', (e) => { state.policyText = e.target.value; });
-  $('ctx-category')?.addEventListener('change', (e) => { state.context.category = e.target.value; renderResults(); });
-  $('ctx-child')?.addEventListener('change', (e) => { state.context.childDirected = e.target.checked; renderResults(); });
-  $('ctx-consent')?.addEventListener('change', (e) => { const v = e.target.value.trim(); state.context.consentAt = v === '' ? null : Number(v); renderResults(); });
   $('dl-json')?.addEventListener('click', downloadJson);
   $('do-print')?.addEventListener('click', printReport);
 }
@@ -597,10 +595,10 @@ function reportObject() {
     disclaimer: { en: t('en', 'disclaimer'), zh: t('zh', 'disclaimer') },
     confirmation: state.consent,
     file: { name: state.file.name, size: state.file.size, sha256: state.fileSha256 },
-    appContext: state.context,
+    appProfile: inferProfile(state.result),
     result: state.result,
     policyCheck: state.policy,
-    riskAreas: { status: 'draft_not_expert_reviewed', context: state.context, items: currentRisks() },
+    riskAreas: { status: 'draft_not_expert_reviewed', items: currentRisks() },
     limitations: LIMITATIONS,
   };
 }

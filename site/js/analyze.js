@@ -605,6 +605,15 @@ export async function analyzeSource(source, kb, { onProgress } = {}) {
     }
   }
 
+  // Store launchers / web installers: the file is not the app and contains none of its code.
+  let notice = null;
+  if (app?.name === 'Google Play Games' && /^Google/.test(app.publisher ?? '')) {
+    notice = {
+      en: 'This file is Google\'s Play Games installer, not the game. It contains none of the game\'s code: the game is downloaded after installation and runs as an Android app. To scan the game, scan its Android file (APK) instead.',
+      zh: '该文件是 Google Play 游戏的安装程序，而不是游戏本身，其中不包含任何游戏代码：游戏在安装后下载并以 Android 应用形式运行。如需扫描该游戏，请改为扫描其 Android 文件（APK）。',
+    };
+  }
+
   return {
     analyzer: { name: 'k1d static analyzer', version: ANALYZER_VERSION, kbVersion: kb.sdks.version },
     platform: facts.platform,
@@ -623,6 +632,7 @@ export async function analyzeSource(source, kb, { onProgress } = {}) {
     android,
     ios,
     traffic,
+    notice,
     details: facts.details,
     limits: facts.limits,
     files: facts.fileCount,
