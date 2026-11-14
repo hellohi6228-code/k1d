@@ -20,6 +20,11 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
     ? S(`before the consent time (${ctx.consentAt}s)`, `在同意时间（${ctx.consentAt} 秒）之前`)
     : S(`before the consent service (${prof.consent.service}) was first contacted at ${ctx.consentAt}s`, `在同意管理服务（${prof.consent.service}）于第 ${ctx.consentAt} 秒首次连接之前`);
   const ga = prof.gaDefaults;
+  // Wording found in the app's resources and text files (analyze.js UI_PATTERNS), and how much was readable.
+  const ui = r.uiText;
+  const cov = r.coverage;
+  const quote = (h) => `“${h.text.length > 160 ? `${h.text.slice(0, 157)}…` : h.text}” (${h.source.split('!').pop()})`;
+  const readNote = cov ? S(` in the ${cov.textFiles} text files k1d read${cov.encrypted.length ? ` (${cov.encrypted.length} encrypted script file(s) could not be read)` : ''}`, `（共读取 ${cov.textFiles} 个文本文件${cov.encrypted.length ? `，${cov.encrypted.length} 个加密脚本文件无法读取` : ''}）`) : S('', '');
   const areas = [];
   const sdk = (cat) => r.sdks.filter((s) => s.category === cat && s.confidence !== 'low');
   const tracking = r.sdks.filter((s) => TRACKING.has(s.category) && s.confidence !== 'low');
@@ -62,7 +67,7 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
         ['PADFA — FTC warning letters to data brokers (Feb 2026)', 'https://www.alstonprivacy.com/ftc-sends-letters-reminding-data-brokers-of-their-obligations-under-padfaa/'],
         ['Texas AG settlement with Temu (Oct 2026)', 'https://www.texasattorneygeneral.gov/news/releases/attorney-general-paxton-secures-first-its-kind-settlement-temu-protect-texans-data-ccp-and-protect'],
       ],
-      next: S('Capture traffic from a US test device to see which data actually reaches these endpoints, where they resolve, and in what volume; compare with US user counts and data categories.', '在美国测试设备上抓包，确认哪些数据实际发往这些接口、其解析地点和数量，并与美国用户规模和数据类别对照。'),
+      unseen: S("What data actually reaches these companies and where it is stored. A file shows what is built in, not what is sent.", "实际有哪些数据到达这些公司、存储在哪里。文件只能显示内置了什么，不能显示发送了什么。"),
     });
   }
 
@@ -82,6 +87,10 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
       if (liveTracking.length) signals.push(S(`At runtime the app contacted ${liveTracking.length} tracking host(s), e.g. ${liveTracking.slice(0, 4).map((h) => h.host).join(', ')}.`, `运行时应用连接了 ${liveTracking.length} 个跟踪主机，如 ${liveTracking.slice(0, 4).map((h) => h.host).join('、')}。`));
       if (['game', 'casino'].includes(ctx.category) && r.capabilities.billing) signals.push(S('Game with in-app purchases: the FTC order against HoYoverse requires parental consent for loot-box purchases by users under 16.', '含应用内购买的游戏：FTC 对 HoYoverse 的命令要求 16 岁以下用户购买抽奖箱须经家长同意。'));
     }
+    if (ui) {
+      if (ui.age.length) for (const h of ui.age.slice(0, 3)) signals.push(S(`Age-question wording in the app: ${quote(h)}.`, `应用中的年龄询问文字：${quote(h)}。`));
+      else signals.push(S(`No age-question wording found${readNote.en}.`, `未发现年龄询问文字${readNote.zh}。`));
+    }
     if (!r.traffic || ageSignals.length) signals.push(ageSignals.length
       ? S(`Platform age-signal API present: ${names(ageSignals)}.`, `存在平台年龄信号 API：${names(ageSignals, 'zh')}。`)
       : S('No platform age-signal API found (Google Play Age Signals / Apple Declared Age Range).', '未发现平台年龄信号 API（Google Play Age Signals / Apple Declared Age Range）。'));
@@ -96,7 +105,7 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
         ['Google Play Age Signals API', 'https://developer.android.com/google/play/age-signals/use-age-signals-api'],
         ['Apple Declared Age Range', 'https://developer.apple.com/documentation/declaredagerange'],
       ],
-      next: S('Run the app with an under-13 and a 13–15 profile and record which SDKs send identifiers before any age gate or consent.', '分别以 13 岁以下和 13–15 岁身份运行应用，记录在年龄门槛或同意前有哪些 SDK 发送了标识符。'),
+      unseen: S("What the SDKs send before an age question or consent (that needs a recording: see the Android recording guide), and text inside encrypted scripts, images or loaded from servers.", "年龄询问或同意之前各 SDK 发送了什么（需要录制流量：见 Android 录制指南），以及加密脚本、图片或从服务器加载的文字。"),
     });
   }
 
@@ -117,7 +126,7 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
         ['Judge approves $92M TikTok settlement (Hunton)', 'https://www.hunton.com/privacy-and-information-security-law/judge-approves-92-million-tiktok-settlement'],
         ['CapCut BIPA lawsuit (The Record)', 'https://therecord.media/capcut-privacy-lawsuit-illinois-bipa-bytedance-china'],
       ],
-      next: S('Check whether face/voice templates are created, whether they leave the device, and what notice and consent the app shows first.', '核实是否生成人脸/声纹模板、是否离开设备，以及应用事先展示的告知和同意。'),
+      unseen: S("Whether face or voice data is actually captured, stored, or sent off the phone.", "是否真的采集、存储或向手机外发送了人脸或声音数据。"),
     });
   }
 
@@ -133,6 +142,9 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
     if (tHosts.length) {
       const live = tHosts.filter((h) => h.flows > 0 && sdkHost(h, tracking));
       if (live.length) signals.push(S(`Tracking SDK hosts contacted at runtime: ${live.slice(0, 6).map((h) => h.host).join(', ')}.`, `运行时连接的跟踪 SDK 主机：${live.slice(0, 6).map((h) => h.host).join('、')}。`));
+      const start = prof.consent?.appStart;
+      const firstMin = start == null ? [] : live.filter((h) => h.relFirst != null && h.relFirst - start <= 60);
+      if (firstMin.length) signals.push(S(`${firstMin.length} tracking host(s) were contacted in the app's first 60 seconds, before any tap if the recording followed the k1d guide: ${firstMin.slice(0, 6).map((h) => h.host).join(', ')}.`, `${firstMin.length} 个跟踪主机在应用启动后 60 秒内即被连接（如按 k1d 指南录制，此时尚未点击任何内容）：${firstMin.slice(0, 6).map((h) => h.host).join('、')}。`));
       const pre = live.filter(before);
       if (pre.length) signals.push(S(`${pre.length} tracking host(s) were contacted ${consentWhen.en}: ${pre.slice(0, 6).map((h) => h.host).join(', ')}.`, `${pre.length} 个跟踪主机${consentWhen.zh}即被连接：${pre.slice(0, 6).map((h) => h.host).join('、')}。`));
       if (live.length && ctx.consentAt == null && prof.consent) {
@@ -150,7 +162,7 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
         ['Blaker v. NetScout — CIPA pen-register claim dismissed (May 2026)', 'https://natlawreview.com/article/cipa-win-california-superior-court-sustains-dismissal-website-tracking-claims'],
         ['First Washington MHMDA class action (Amazon ad SDK)', 'https://www.wilmerhale.com/en/insights/blogs/wilmerhale-privacy-and-cybersecurity-law/20250220-first-lawsuit-filed-under-washingtons-my-health-my-data-act'],
       ],
-      next: S('Record which SDKs transmit before consent, and whether session replay masks text fields and payment screens.', '记录哪些 SDK 在同意前传输数据，以及会话回放是否遮蔽文本输入和支付页面。'),
+      unseen: S("What each tracking SDK sends, and whether it sends it before the user agrees.", "各跟踪 SDK 发送了什么，以及是否在用户同意之前发送。"),
     });
   }
 
@@ -173,7 +185,7 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
         ['First Washington MHMDA class action', 'https://www.wilmerhale.com/en/insights/blogs/wilmerhale-privacy-and-cybersecurity-law/20250220-first-lawsuit-filed-under-washingtons-my-health-my-data-act'],
         ['Missouri sues Temu over location, camera and microphone access', 'https://www.stlpr.org/government-politics-issues/2026-10-13/missouri-sues-temu-says-shopping-app-can-access-phone-location-camera-and-microphone'],
       ],
-      next: S('Check the precision and frequency of location sent off-device, and to which recipients.', '核实发往设备外的位置精度、频率及接收方。'),
+      unseen: S("How precise the location is, how often it is sent, and to whom.", "位置精度如何、多久发送一次、发给谁。"),
     });
   }
 
@@ -194,20 +206,23 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
       why: S('The Video Privacy Protection Act (18 U.S.C. § 2710; $2,500 liquidated damages per person) has been used against apps that send what a user watched together with a persistent identifier to ad or analytics partners. Short-drama and video apps fit this pattern.',
         '《视频隐私保护法》（18 U.S.C. § 2710；每人 2500 美元约定赔偿）曾被用于起诉将用户观看内容与持久标识符一并发送给广告或统计合作方的应用。短剧和视频应用符合这一模式。'),
       refs: [['18 U.S.C. § 2710 (Cornell LII)', 'https://www.law.cornell.edu/uscode/text/18/2710']],
-      next: S('Play an episode and inspect whether any third-party request contains both a video/episode ID and a user or device identifier.', '播放一集，检查是否有第三方请求同时包含视频/剧集 ID 和用户或设备标识符。'),
+      unseen: S("Whether what users watch is sent to ad or analytics companies together with an identifier.", "用户观看的内容是否连同标识符一起发送给广告或统计公司。"),
     });
   }
 
   // 7 ── Subscriptions / auto-renewal
   {
     const signals = [];
-    if (r.capabilities.billing) signals.push(S('In-app purchase / subscription capability found.', '发现应用内购买/订阅功能。'));
+    const subs = ui?.subscription ?? [];
+    if (r.capabilities.billing) signals.push(S('In-app purchases are built in (Google Play Billing / StoreKit).', '内置应用内购买（Google Play Billing / StoreKit）。'));
+    for (const h of subs.slice(0, 4)) signals.push(S(`Subscription wording in the app: ${quote(h)}.`, `应用中的订阅文字：${quote(h)}。`));
+    if (ui && r.capabilities.billing && !subs.length) signals.push(S(`No subscription or auto-renewal wording found${readNote.en}.`, `未发现订阅或自动续费文字${readNote.zh}。`));
     areas.push({
-      id: 'subscriptions', title: S('Subscriptions and auto-renewal', '订阅与自动续费'), signals,
+      id: 'subscriptions', title: S('Subscriptions and auto-renewal', '订阅与自动续费'), signals, attention: ui ? subs.length > 0 : signals.length > 0,
       why: S('California\'s Automatic Renewal Law (Cal. Bus. & Prof. Code § 17600 et seq.) and the federal ROSCA (15 U.S.C. §§ 8401–8405) require clear terms and consent before charging and an easy way to cancel. Short-drama coin and VIP paywalls are a frequent subject.',
         '加州《自动续费法》（Cal. Bus. & Prof. Code § 17600 起）及联邦 ROSCA（15 U.S.C. §§ 8401–8405）要求扣费前清楚披露条款并取得同意，并提供简便的取消方式。短剧金币和 VIP 付费墙是常见关注对象。'),
       refs: [['ROSCA, 15 U.S.C. ch. 110 (Cornell LII)', 'https://www.law.cornell.edu/uscode/text/15/chapter-110']],
-      next: S('Screenshot each paywall: price, billing period, trial terms, renewal statement and cancellation path near the purchase button.', '截取每个付费墙：价格、计费周期、试用条款、续费说明及购买按钮附近的取消方式。'),
+      unseen: S("Product prices and paywall screens: they come from the store and the app's servers at runtime, not from the file. Text inside encrypted scripts or images.", "商品价格和付费页面：运行时来自商店和应用服务器，不在文件中。以及加密脚本或图片中的文字。"),
     });
   }
 
@@ -216,6 +231,8 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
     const signals = [];
     const gameish = ['game', 'casino'].includes(ctx.category);
     if (gameish && r.capabilities.billing) signals.push(S(`${ctx.category === 'casino' ? 'Social-casino' : 'Game'} app with in-app purchases (virtual currency / loot boxes possible).`, `${ctx.category === 'casino' ? '社交博彩' : '游戏'}应用含应用内购买（可能涉及虚拟货币/抽奖箱）。`));
+    for (const h of (ui?.odds ?? []).slice(0, 4)) signals.push(S(`Odds / loot-box wording in the app: ${quote(h)}.`, `应用中的概率/抽奖文字：${quote(h)}。`));
+    if (ui && gameish && r.capabilities.billing && !ui.odds.length) signals.push(S(`No odds, drop-rate or loot-box wording found${readNote.en}.`, `未发现概率、掉落率或抽奖箱文字${readNote.zh}。`));
     areas.push({
       id: 'gambling', title: S('Loot boxes, virtual currency, social casino', '抽奖箱、虚拟货币与社交博彩'), signals,
       why: S('Washington\'s gambling-loss recovery law drives class actions against social-casino apps: a $24.9M jury verdict against High 5 Games (Feb 2025) and a proposed $201M judgment in Horn v. Amazon (Jul 2026). The FTC\'s HoYoverse order covers loot-box odds disclosure and virtual-currency practices.',
@@ -224,7 +241,7 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
         ['Social casino litigation in Washington (National Law Review)', 'https://natlawreview.com/article/operating-social-casino-style-applications-continues-be-costly-washington-state'],
         ['Amazon social casino settlement (Covers)', 'https://www.covers.com/industry/amazon-agrees-to-settlement-over-social-casino-apps-lawsuit-july-14-2026'],
       ],
-      next: S('Document loot-box odds disclosures, virtual-currency pricing, and whether prizes can be cashed out or transferred.', '记录抽奖箱概率披露、虚拟货币定价，以及奖励能否兑现或转让。'),
+      unseen: S("Odds shown in images or loaded from servers, and whether prizes can be cashed out or transferred.", "图片中或从服务器加载的概率，以及奖励能否兑现或转让。"),
     });
   }
 
@@ -241,7 +258,7 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
         ['California SB 243 (TechCrunch)', 'https://techcrunch.com/2025/09/10/a-california-bill-that-would-regulate-ai-companion-chatbots-is-close-to-becoming-law'],
         ['FTC 6(b) orders on AI companion chatbots (DLA Piper)', 'https://www.dlapiper.com/en/insights/publications/2025/09/ftc-ai-chatbots'],
       ],
-      next: S('Check the in-chat AI disclosure, minor safeguards, and where conversation text is sent and stored.', '核实聊天中的 AI 身份披露、未成年人保护措施，以及对话内容发送和存储的位置。'),
+      unseen: S("What the chatbot tells users about being an AI, and where conversations are sent and stored.", "聊天机器人如何告知用户其为 AI，以及对话发送和存储到哪里。"),
     });
   }
 
@@ -262,7 +279,7 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
       why: S('The FTC treats unreasonable data security as an unfair practice (FTC Act § 5), and state breach and data-security laws apply when personal data is exposed. Hard-coded cloud keys can expose every user\'s stored data.',
         'FTC 将不合理的数据安全措施视为不公平行为（FTC 法第 5 条），个人数据泄露时还适用各州泄露通知和数据安全法。硬编码的云服务密钥可能导致全部用户存储数据外泄。'),
       refs: [['FTC Act § 5, 15 U.S.C. § 45 (Cornell LII)', 'https://www.law.cornell.edu/uscode/text/15/45']],
-      next: S('Rotate any exposed keys and check what each key can access; confirm all traffic uses TLS.', '轮换已暴露的密钥并核实其访问范围；确认所有流量均使用 TLS。'),
+      unseen: S("What each exposed key can access, and whether all traffic is encrypted when the app runs.", "每个暴露的密钥能访问什么，以及应用运行时是否所有流量都已加密。"),
     });
   }
 
@@ -298,7 +315,7 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
       why: S('State AG complaints against China-linked apps (e.g., Temu) allege access beyond what the app needs — installed apps, other apps\' data, camera, microphone, location — and the ability to change behavior after installation, framed as deceptive or unfair practices.',
         '各州检察长对中国关联应用（如 Temu）的起诉指控其访问超出所需的数据——已安装应用、其他应用数据、相机、麦克风、位置——以及安装后改变行为的能力，并据此认定为欺骗性或不公平行为。'),
       refs: [['Missouri v. Temu (St. Louis Public Radio)', 'https://www.stlpr.org/government-politics-issues/2026-10-13/missouri-sues-temu-says-shopping-app-can-access-phone-location-camera-and-microphone']],
-      next: S('For each sensitive access, document the user-facing feature that needs it and whether the disclosure says so.', '针对每项敏感访问，记录需要该访问的面向用户的功能，以及披露中是否说明。'),
+      unseen: S("Which app features use each access, and whether the app explains this to users.", "哪些功能使用了这些访问权限，以及应用是否向用户说明。"),
     });
   }
 
@@ -315,11 +332,11 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
     }
     if (r.capabilities.declaresTracking && !r.capabilities.trackingPrompt && r.platform === 'ios') signals.push(S('Privacy manifests declare tracking but the app has no App Tracking Transparency prompt text.', '隐私清单声明了跟踪，但应用没有 App Tracking Transparency 提示文字。'));
     areas.push({
-      id: 'disclosures', title: S('Disclosures vs. what the app contains', '披露内容与应用实际包含内容'), signals,
+      id: 'disclosures', title: S('Disclosures vs. what the app contains', '披露内容与应用实际包含内容'), signals, attention: signals.length > 0,
       why: S('Most state AG cases against China-linked apps are UDAP claims built on gaps between what the app does and what its policy or store labels say (FTC Act § 5 and state consumer-protection acts).',
         '各州检察长针对中国关联应用的案件大多为 UDAP 主张，依据是应用实际行为与隐私政策或商店标签之间的差异（FTC 法第 5 条及各州消费者保护法）。'),
       refs: [['Texas AG settlement with Temu', 'https://www.texasattorneygeneral.gov/news/releases/attorney-general-paxton-secures-first-its-kind-settlement-temu-protect-texans-data-ccp-and-protect']],
-      next: S('Compare these findings with the app\'s privacy policy and its App Store privacy label / Google Play Data Safety form.', '将这些发现与应用的隐私政策及 App Store 隐私标签 / Google Play 数据安全表单对照。'),
+      unseen: S("The full text of the privacy policy and the store privacy labels: they are online, not inside the app file.", "隐私政策全文和商店隐私标签：它们在网上，不在应用文件中。"),
     });
   }
 
@@ -332,11 +349,17 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
       why: S('The Protecting Americans from Foreign Adversary Controlled Applications Act (2024) names ByteDance/TikTok and lets the President designate other social apps controlled by a foreign adversary that meet user thresholds. Ownership structure, not the code, decides coverage.',
         '《保护美国人免受外国对手控制应用法》（2024）点名字节跳动/TikTok，并允许总统指定其他符合用户规模门槛、受外国对手控制的社交应用。是否适用取决于股权结构，而非代码。'),
       refs: [['PAFACA text (Congress.gov, H.R. 7521)', 'https://www.congress.gov/bill/118th-congress/house-bill/7521']],
-      next: S('Map the ultimate ownership of the publisher and its US user counts.', '梳理发行商的最终股权结构及其美国用户规模。'),
+      unseen: S("Who ultimately owns the publisher and how many US users it has.", "发行商的最终所有者是谁，以及其美国用户数量。"),
     });
   }
 
   for (const a of areas) a.status = (a.attention ?? a.signals.length > 0) ? 'signals' : 'none';
+  // Informational lines that don't change a status.
+  const disc = areas.find((a) => a.id === 'disclosures');
+  if (disc && ui?.consent.length) disc.signals.push(S(`Consent / policy wording in the app: ${ui.consent.slice(0, 4).map((h) => `“${h.text.length > 60 ? `${h.text.slice(0, 57)}…` : h.text}”`).join(', ')}.`, `应用中的同意/政策文字：${ui.consent.slice(0, 4).map((h) => `“${h.text.length > 60 ? `${h.text.slice(0, 57)}…` : h.text}”`).join('、')}。`));
+  // Links on SDK vendors' domains are the vendors' own policies, not the app's.
+  const policyUrls = [...new Set(r.endpoints.filter((e) => !e.operator).flatMap((e) => e.urls).filter((u) => /privacy|policy|terms|agreement/i.test(u)))].slice(0, 4);
+  if (disc && policyUrls.length) disc.signals.push(S(`Policy links in the app: ${policyUrls.join(', ')}.`, `应用中的政策链接：${policyUrls.join('、')}。`));
   const order = { signals: 0, context: 1, none: 2 };
   areas.sort((a, b) => order[a.status] - order[b.status]);
   return areas;

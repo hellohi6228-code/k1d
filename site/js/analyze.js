@@ -44,6 +44,30 @@ const TEXT_FILE_RE = /\.(json|xml|txt|properties|js|html?|cfg|ini|conf|ya?ml|pli
 const CONFIG_KEY_RE = /^[A-Z][A-Z0-9_.]*(APPKEY|APP_KEY|APPID|APP_ID|API_KEY|APPSECRET|APP_SECRET|CHANNEL)[A-Z0-9_]*$/;
 const MAX_TEXT_FILE = 4 * 1024 * 1024;
 const MAX_TEXT_FILES = 400;
+// Total bytes of app text files read per module (was a 400-file cap; big games ship thousands).
+const MAX_TEXT_BYTES = 256 * 1024 * 1024;
+// User-facing wording the risk areas look for. Matched in resources and text assets only, not in
+// compiled code, so SDK internals don't count. Each hit keeps a snippet and the file it came from.
+const UI_PATTERNS = {
+  age: /\b(?:how old are you|enter your (?:age|birthday|date of birth)|your age|date of birth|year of birth|birth ?year|age verification|age gate|(?:are you|i am|i'm) (?:over|under|at least|older than|younger than) \d{2})\b|请输入.{0,4}(?:年龄|生日)|您的年龄|出生日期|出生年份|未满\s?\d+\s?岁/i,
+  subscription: /\b(?:auto-?renew\w*|subscription|subscribe now|free trial|cancel anytime|billed (?:weekly|monthly|yearly|annually)|per (?:week|month|year))\b|自动续费|自动续订|连续包月|免费试用|订阅会员|订阅服务/i,
+  odds: /\b(?:drop rates?|probabilit(?:y|ies)|loot ?box(?:es)?|gacha|lucky (?:draw|spin|wheel)|spin the wheel)\b|概率|抽奖|扭蛋/i,
+  consent: /\b(?:privacy policy|terms of (?:use|service)|i agree|accept (?:all|terms)|do not sell|personali[sz]ed ads)\b|隐私政策|用户协议|同意并继续/i,
+};
+export function uiTextTo(facts) {
+  facts.uiText ??= { age: [], subscription: [], odds: [], consent: [] };
+  return (text, source) => {
+    if (!text || text.length < 4) return;
+    for (const [k, re] of Object.entries(UI_PATTERNS)) {
+      const list = facts.uiText[k];
+      if (list.length >= 12) continue;
+      const m = re.exec(text);
+      if (!m) continue;
+      const snip = text.slice(Math.max(0, m.index - 70), m.index + m[0].length + 70).replace(/<[^>]+>/g, ' ').replace(/\\[nrt]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!list.some((x) => x.text === snip)) list.push({ text: snip, source });
+    }
+  };
+}
 const MAX_NATIVE_SCAN = 48 * 1024 * 1024;
 
 function emptyFacts() {
@@ -131,6 +155,8 @@ function aabLayout(module) {
 async function collectAndroid(zip, facts, label, layout, progress) {
   const addUrls = addUrlsTo(facts);
   const scanText = scanTextTo(facts);
+  const uiText = uiTextTo(facts);
+  facts.coverage ??= { textFiles: 0, textSkipped: 0, encrypted: [] };
   facts.platform = 'android';
   facts.fileCount += zip.entries.length;
   const prefix = label ? `${label}!` : '';
@@ -171,8 +197,8 @@ async function collectAndroid(zip, facts, label, layout, progress) {
   try {
     const arsc = await zip.readEntry(layout.arsc);
     if (arsc) {
-      if (layout.proto) { const t = latin1(arsc); addUrls(t, prefix + layout.arsc); scanText(t, prefix + layout.arsc); }
-      else for (const s of parseArscStrings(arsc)) { if (s.includes('://')) addUrls(s, prefix + layout.arsc); scanText(s, prefix + layout.arsc); }
+      if (layout.proto) { const t = new TextDecoder().decode(arsc); addUrls(t, prefix + layout.arsc); scanText(t, prefix + layout.arsc); for (const s of t.split(/[\x00-\x08\x0e-\x1f]+/)) uiText(s, prefix + layout.arsc); }
+      else for (const s of parseArscStrings(arsc)) { if (s.includes('://')) addUrls(s, prefix + layout.arsc); scanText(s, prefix + layout.arsc); uiText(s, prefix + layout.arsc); }
     }
   } catch (err) {
     facts.errors.push(`${prefix}${layout.arsc}: ${err.message}`);
@@ -180,15 +206,21 @@ async function collectAndroid(zip, facts, label, layout, progress) {
 
   const td = new TextDecoder('utf-8');
   const textEntries = zip.entries
-    .filter((e) => layout.assets.some((a) => e.name.startsWith(a)) && TEXT_FILE_RE.test(e.name) && e.size <= MAX_TEXT_FILE)
-    .slice(0, MAX_TEXT_FILES);
+    .filter((e) => layout.assets.some((a) => e.name.startsWith(a)) && TEXT_FILE_RE.test(e.name) && e.size <= MAX_TEXT_FILE);
+  let textBudget = MAX_TEXT_BYTES;
   for (const e of textEntries) {
+    if (textBudget <= 0) { facts.coverage.textSkipped += 1; continue; }
+    textBudget -= e.size;
     try {
       const text = td.decode(await zip.readEntry(e));
       if (text.includes('://')) addUrls(text, prefix + e.name);
       scanText(text, prefix + e.name);
+      uiText(text, prefix + e.name);
+      facts.coverage.textFiles += 1;
     } catch { /* ignore */ }
   }
+  // Compiled/encrypted game scripts (Cocos .jsc, Unity IL2CPP metadata) hold UI text k1d can't read.
+  for (const e of zip.entries) if (layout.assets.some((a) => e.name.startsWith(a)) && /\.jsc$|global-metadata\.dat$/i.test(e.name)) facts.coverage.encrypted.push(prefix + e.name);
 
   const libEntries = [];
   for (const e of zip.entries) {
@@ -468,7 +500,7 @@ export async function analyzeSource(source, kb, { onProgress } = {}) {
   const started = Date.now();
   progress({ step: 'open' });
   const facts = emptyFacts();
-  const ctx = { addUrls: addUrlsTo(facts), scanText: scanTextTo(facts), progress };
+  const ctx = { addUrls: addUrlsTo(facts), scanText: scanTextTo(facts), uiText: uiTextTo(facts), progress };
   if (source.size < 4) throw new Error('NOT_A_ZIP');
   const head = await source.read(0, Math.min(64, source.size));
   const ascii = new TextDecoder('latin1').decode(head);
@@ -647,6 +679,14 @@ export async function analyzeSource(source, kb, { onProgress } = {}) {
     }
   }
 
+  if (facts.coverage?.encrypted.length) {
+    const n = facts.coverage.encrypted.length;
+    const eg = facts.coverage.encrypted[0].split('!').pop();
+    facts.limits.push({
+      en: `${n} encrypted or compiled script file(s) could not be read (for example ${eg}). Text and logic inside them were not scanned.`,
+      zh: `${n} 个加密或编译后的脚本文件无法读取（例如 ${eg}），其中的文字和逻辑未被扫描。`,
+    });
+  }
   // Store launchers / web installers: the file is not the app and contains none of its code.
   let notice = null;
   if (app?.name === 'Google Play Games' && /^Google/.test(app.publisher ?? '')) {
@@ -675,6 +715,8 @@ export async function analyzeSource(source, kb, { onProgress } = {}) {
     ios,
     traffic,
     privacyReport,
+    uiText: facts.uiText ?? null,
+    coverage: facts.coverage ?? null,
     notice,
     details: facts.details,
     limits: facts.limits,

@@ -602,7 +602,7 @@ function risksHtml(areas) {
       <div class="risk-head"><h3>${esc(pick(a.title))}</h3><span class="pill ${STATUS_PILL[a.status]}">${esc(L(`status_${a.status}`))}</span></div>
       ${a.signals.length ? `<h4>${esc(L('observation'))}</h4><ul class="list-plain">${a.signals.map((s) => `<li>${esc(pick(s))}</li>`).join('')}</ul>` : `<p class="muted small">${esc(L('riskNone'))}</p>`}
       <h4>${esc(L('whyMatters'))}</h4><p>${esc(pick(a.why))}</p>
-      <h4>${esc(L('verifyNext'))}</h4><p>${esc(pick(a.next))}</p>
+      <h4>${esc(L('unseenTitle'))}</h4><p>${esc(pick(a.unseen))}</p>
       <p class="cite">${a.refs.map(([label, url]) => `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`).join(' · ')}</p>
     </article>`).join('');
 }

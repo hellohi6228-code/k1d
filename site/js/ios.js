@@ -46,7 +46,7 @@ function ownerOf(path, appDir, appName) {
 
 const stripExt = (n) => n.replace(/\.(framework|bundle|appex|dylib|app)$/, '');
 
-export async function collectApple(zip, facts, { addUrls, scanText, progress, bundle, collectAsar }) {
+export async function collectApple(zip, facts, { addUrls, scanText, uiText = () => {}, progress, bundle, collectAsar }) {
   const { kind, appDir, appName } = bundle;
   const mac = kind === 'macos';
   const inApp = zip.entries.filter((e) => e.name.startsWith(appDir));
@@ -287,6 +287,7 @@ export async function collectApple(zip, facts, { addUrls, scanText, progress, bu
       const text = td.decode(await zip.readEntry(e));
       if (text.includes('://')) addUrls(text, e.name.slice(appDir.length));
       scanText(text, e.name.slice(appDir.length));
+      uiText(text, e.name.slice(appDir.length));
     } catch { /* ignore */ }
   }
 }

@@ -149,7 +149,7 @@ test('risk areas: automatic profile, signals and references (no user input)', as
     assert.ok(['signals', 'none'].includes(a.status), `${a.id}: no status asks for input`);
     assert.ok(a.refs.length >= 1, `${a.id} has references`);
     for (const [, url] of a.refs) assert.match(url, /^https:\/\//);
-    assert.ok(a.why.en && a.why.zh && a.next.en && a.next.zh, `${a.id} bilingual`);
+    assert.ok(a.why.en && a.why.zh && a.unseen.en && a.unseen.zh, `${a.id} bilingual`);
   }
 });
 
