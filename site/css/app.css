@@ -199,3 +199,7 @@ textarea.policy { width: 100%; min-height: 200px; resize: vertical; }
 .how { margin-top: 18px; }
 .how .kv dt { font-weight: 600; color: var(--text, inherit); }
 @media (max-width: 560px) { .how .kv { grid-template-columns: 1fr; } .how .kv dd { margin-bottom: 8px; } }
+.app-card summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.app-card summary code { overflow-wrap: anywhere; }
+.app-card .app-pills { display: flex; flex-wrap: wrap; gap: 4px; }
+.app-card[open] summary { margin-bottom: 10px; }

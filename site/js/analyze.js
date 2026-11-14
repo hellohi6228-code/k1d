@@ -13,6 +13,7 @@ import { isPE } from './pe.js';
 import { isCFB } from './cfb.js';
 import { isXar, collectPkg } from './pkg.js';
 import { isPcap, analyzePcap, hostsFromFlows } from './pcap.js';
+import { isPrivacyReport, parsePrivacyReport, cnOwnerMatcher } from './privacyreport.js';
 import {
   collectPE, collectMsix, collectMsi, collectELF, collectDeb, collectRpm, collectAsar, collectHarmony,
   collectExtension, crxZipOffset, isWxapkg, collectWxapkg, collectGeneric, collectNestedZip, offsetSource, scanBinary,
@@ -330,7 +331,7 @@ function detectSdks(facts, kb, hosts) {
     for (const suffix of sdk.domains ?? []) {
       const matched = hosts.filter((h) => hostMatches(h, suffix));
       // In a network capture the host was actually contacted, which is stronger than a string in the file.
-      if (matched.length) evidence.push({ type: facts.platform === 'traffic' ? 'traffic' : 'domain', signature: suffix, samples: facts.platform === 'traffic' ? matched : matched.slice(0, 5) });
+      if (matched.length) evidence.push({ type: RUNTIME.has(facts.platform) ? 'traffic' : 'domain', signature: suffix, samples: RUNTIME.has(facts.platform) ? matched : matched.slice(0, 5) });
     }
     if (!evidence.length) continue;
     const kinds = new Set(evidence.map((e) => e.type));
@@ -404,6 +405,8 @@ function buildPermissions(facts, permKb) {
 
 // ---------------------------------------------------------------- entry point
 const MAX_WHOLE_FILE = 1024 * 1024 * 1024;
+// Inputs that record what apps did at runtime (not what a file contains).
+const RUNTIME = new Set(['traffic', 'iphone-report']);
 
 async function collectMachOFile(source, facts, ctx) {
   facts.platform = 'macos';
@@ -473,7 +476,15 @@ export async function analyzeSource(source, kb, { onProgress } = {}) {
   let container;
   const big = source.size > MAX_WHOLE_FILE;
 
-  if (isPcap(head) && !big) {
+  const textHead = /^\s*\{/.test(ascii) && source.size < 512 * 1024 * 1024 ? new TextDecoder().decode(await source.read(0, Math.min(16384, source.size))) : '';
+  if (textHead && isPrivacyReport(textHead)) {
+    const rep = parsePrivacyReport(new TextDecoder().decode(await source.read(0, source.size)));
+    facts.platform = 'iphone-report';
+    facts.app = { id: null, name: null, versionName: null, versionCode: null, minSdk: null, targetSdk: null };
+    for (const a of rep.apps) for (const d of a.domains) if (d.appInitiated) ctx.addUrls(`https://${d.domain}/`, a.bundleId);
+    facts.privacyReport = rep;
+    container = 'ndjson';
+  } else if (isPcap(head) && !big) {
     const t = analyzePcap(await source.read(0, source.size));
     facts.platform = 'traffic';
     facts.app = { id: null, name: null, versionName: null, versionCode: null, minSdk: null, targetSdk: null };
@@ -544,6 +555,37 @@ export async function analyzeSource(source, kb, { onProgress } = {}) {
     if (!t.parsedPackets) facts.limits.push({ en: 'No IP packets could be decoded from this capture (unsupported link type or encrypted Wi-Fi frames).', zh: '无法从该抓包中解码 IP 数据包（不支持的链路类型或加密的 Wi-Fi 帧）。' });
   }
   const sdks = detectSdks(facts, kb.sdks, endpoints.map((e) => e.host));
+  let privacyReport = null;
+  if (facts.privacyReport) {
+    const rep = facts.privacyReport;
+    const ep = new Map(endpoints.map((e) => [e.host, e]));
+    const sdkFor = new Map();
+    for (const s of sdks) for (const e of s.evidence) if (e.type === 'traffic') for (const h of e.samples) sdkFor.set(h, s);
+    const cnOwner = cnOwnerMatcher(kb);
+    const apps = rep.apps.map((a) => {
+      const domains = a.domains.map((d) => {
+        const e = ep.get(d.domain);
+        const s = sdkFor.get(d.domain);
+        const ind = [...(e?.cnIndicators ?? [])];
+        const own = cnOwner(d.owner);
+        if (own && !ind.length) ind.push({ type: 'owner', operator: own, text: `Domain owner "${d.owner}" is listed in the knowledge base as PRC-headquartered` });
+        return { ...d, sdk: s ? { id: s.id, name: s.name, category: s.category } : null, cnIndicators: d.appInitiated ? ind : [] };
+      });
+      const appDomains = domains.filter((d) => d.appInitiated);
+      return {
+        bundleId: a.bundleId,
+        domains,
+        access: a.access,
+        appDomains: appDomains.length,
+        trackers: appDomains.filter((d) => d.tracker).length,
+        cnDomains: appDomains.filter((d) => d.cnIndicators.length).length,
+        hits: appDomains.reduce((n, d) => n + d.hits, 0),
+        apple: a.bundleId.startsWith('com.apple.'),
+      };
+    }).sort((x, y) => y.cnDomains - x.cnDomains || y.trackers - x.trackers || y.hits - x.hits);
+    privacyReport = { start: rep.start, end: rep.end, records: rep.lines, unreadable: rep.bad, apps };
+    if (rep.bad) facts.limits.push({ en: `${rep.bad} line(s) of the report could not be read.`, zh: `报告中有 ${rep.bad} 行无法读取。` });
+  }
   const permissions = [...buildPermissions(facts, kb.permissions), ...(facts.ios ? facts.permissionList : [])];
 
   let cert = null;
@@ -632,6 +674,7 @@ export async function analyzeSource(source, kb, { onProgress } = {}) {
     android,
     ios,
     traffic,
+    privacyReport,
     notice,
     details: facts.details,
     limits: facts.limits,

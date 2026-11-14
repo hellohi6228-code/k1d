@@ -18,6 +18,7 @@ k1d reads an app or installer **in your browser** and shows what's inside it. It
 | WeChat mini-programs | `.wxapkg` (unencrypted) |
 | Electron | `app.asar` (standalone, inside installers, macOS bundles and `.deb`) |
 | Network captures | `.pcap`, `.pcapng` from the phone or emulator running the app (Ethernet, raw IP, Linux cooked, 802.11 + radiotap) |
+| iPhone / iPad | App Privacy Report export (`.ndjson`): Settings → Privacy & Security → App Privacy Report → Save App Activity |
 | Anything else | Generic scan for URLs and credentials, with the limit stated |
 
 ## What it reports
@@ -48,6 +49,7 @@ k1d reads an app or installer **in your browser** and shows what's inside it. It
   - MSIX capabilities, HarmonyOS permissions, extension permissions, mini-program APIs and scopes.
 - **Declared data (iOS/macOS).** Privacy manifests from the app and every SDK.
 - **Network traffic (from a capture).** Every host the app contacted, when it was first contacted, bytes sent and received, and protocol. Host names come from DNS and TLS SNI; QUIC is named via DNS. Plain-HTTP requests are shown in full and scanned for credentials. The consent moment is found automatically (first contact with a consent-management service such as Google UMP); hosts contacted before it are marked and feed the risk areas. Encrypted contents are not decrypted.
+- **iPhone App Privacy Report.** For every app on the phone (last 7 days): the domains it contacted and how often, China-linked domains (by knowledge-base domain, `.cn`, or domain owner), domains Apple flags as possibly collecting information across apps and sites, and when it used the camera, microphone, location, photos or contacts. Websites the user opened are kept separate. Works from Safari on the iPhone itself.
 - **Endpoints.** Hosts on PRC clouds and `.cn` domains are flagged, as are cleartext connections.
 - **Hard-coded credentials.** AWS, Alibaba Cloud, Tencent Cloud, private keys, GitHub, Slack, Stripe, FCM and OpenAI-style keys. Values are always masked.
 - **Signing.** APK v1–v3, iOS/macOS code signing (Team ID, entitlements), Authenticode (signer chosen by serial number), MSIX, pkg.
@@ -71,6 +73,7 @@ node scripts/check-claims.mjs
 - **Android:** ground truth comes from Google's `aapt2` (binary and protobuf manifests) and `openssl`.
 - **iOS:** a synthetic IPA with an `openssl` CMS chain.
 - **Network captures:** synthetic pcap/pcapng fixtures built by `tools/build-demo-pcap.mjs`.
+- **App Privacy Report:** a synthetic NDJSON export built by `tools/build-demo-privacyreport.mjs`, following the record layout Apple documents.
 - **Other formats:** fixtures built by `tools/build-demo-formats.mjs` (signers from `openssl`). `IdleQuest.msi` is created by Windows Installer itself.
 - **Real binaries:** `tests/real-binaries.test.mjs` checks real signed Windows executables against the thumbprints and version info that Windows reports. It is skipped where the files aren't present, for example in CI.
 

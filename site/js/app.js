@@ -32,7 +32,7 @@ const pick = (obj) => (obj ? obj[state.lang] ?? obj.en : '');
 const isIos = () => Boolean(state.result?.ios); // iOS and macOS app bundles
 const PLATFORM_LABELS = {
   android: 'Android', ios: 'iOS', macos: 'macOS', windows: 'Windows', linux: 'Linux', harmonyos: 'HarmonyOS',
-  'browser-extension': 'Browser extension', miniprogram: 'WeChat mini-program', electron: 'Electron', archive: 'Archive', unknown: 'Unknown', traffic: 'Network capture',
+  'browser-extension': 'Browser extension', miniprogram: 'WeChat mini-program', electron: 'Electron', archive: 'Archive', unknown: 'Unknown', traffic: 'Network capture', 'iphone-report': 'iPhone App Privacy Report',
 };
 
 // Knowledge-base indicator texts are stored in English; translate the known patterns for ZH.
@@ -189,6 +189,17 @@ async function runAnalysis() {
 
 // ---------------------------------------------------------------- results
 function stats(r) {
+  if (r.privacyReport) {
+    const apps = r.privacyReport.apps.filter((a) => !a.apple);
+    const flagged = new Set(apps.flatMap((a) => a.domains.filter((d) => d.tracker && d.appInitiated).map((d) => d.domain)));
+    const cnApps = apps.filter((a) => a.cnDomains).length;
+    return [
+      { n: apps.length, l: L('appsRecorded') },
+      { n: cnApps, l: L('appsCnStat'), cls: cnApps ? 'cn' : '' },
+      { n: flagged.size, l: L('trackerDomains') },
+      { n: apps.filter((a) => a.access.some((c) => ['camera', 'microphone', 'location'].includes(c.category))).length, l: L('appsSensitive') },
+    ];
+  }
   const cn = r.sdks.filter((s) => s.cnNexus).length;
   const sensitive = r.permissions.filter((p) => p.level === 'high' || p.level === 'medium').length;
   return [
@@ -200,6 +211,7 @@ function stats(r) {
 }
 
 function tabs() {
+  if (state.result.privacyReport) return ['apps', 'sdks', 'endpoints', 'export'];
   if (state.result.traffic) return ['risks', 'traffic', 'sdks', 'endpoints', 'policy', 'export'];
   const list = ['risks', 'sdks', 'permissions', 'endpoints'];
   if (isIos()) list.push('declared');
@@ -211,8 +223,9 @@ function tabCount(tab) {
   const r = state.result;
   return {
     sdks: r.sdks.length, permissions: r.permissions.length, endpoints: r.endpoints.length,
-    declared: r.ios ? r.ios.declaredData.length : undefined, risks: currentRisks().filter((a) => a.status === 'signals').length,
+    declared: r.ios ? r.ios.declaredData.length : undefined, risks: r.privacyReport ? undefined : currentRisks().filter((a) => a.status === 'signals').length,
     traffic: r.traffic ? r.traffic.hosts.filter((h) => h.flows > 0).length : undefined,
+    apps: r.privacyReport ? r.privacyReport.apps.filter((a) => !a.apple).length : undefined,
   }[tab];
 }
 
@@ -225,7 +238,9 @@ function renderResults() {
   const platform = `${PLATFORM_LABELS[r.platform] ?? r.platform} · ${String(r.container).toUpperCase()}`;
   const id = r.app.id ?? state.file.name;
   $('r-title').innerHTML = `<span class="platform">${esc(platform)}</span>${r.app.name && r.app.name !== id ? `${esc(r.app.name)} ` : ''}<span class="${r.app.name && r.app.name !== id ? 'muted' : ''}">${esc(id)}</span> <span class="muted">${esc(r.app.versionName ?? '')}${r.app.versionCode != null ? ` (${esc(r.app.versionCode)})` : ''}</span>`;
-  const minLine = r.traffic
+  const minLine = r.privacyReport
+    ? L('aprMeta', { from: fmtDate(r.privacyReport.start), to: fmtDate(r.privacyReport.end), n: r.privacyReport.records })
+    : r.traffic
     ? L('trafficMeta', { packets: r.traffic.packets, s: r.traffic.duration ?? '?', flows: r.traffic.flows })
     : r.platform === 'android'
     ? L('minTarget', { min: r.app.minSdk ?? '?', target: r.app.targetSdk ?? '?' })
@@ -236,7 +251,7 @@ function renderResults() {
     ${esc(L('analyzedIn', { s: (r.durationMs / 1000).toFixed(1), v: ANALYZER_VERSION, kb: r.analyzer.kbVersion }))}${r.notice ? `<div class="banner" style="margin-top:12px"><strong>${esc(pick(r.notice))}</strong></div>` : ''}`;
   $('r-stats').innerHTML = stats(r).map((s) => `<div class="stat ${s.cls ?? ''}"><div class="n">${s.n}</div><div class="l">${esc(s.l)}</div></div>`).join('');
   const list = tabs();
-  if (!list.includes(state.tab)) state.tab = 'sdks';
+  if (!list.includes(state.tab)) state.tab = list.includes('apps') ? 'apps' : 'sdks';
   $('r-tabs').innerHTML = list.map((tab) => {
     const c = tabCount(tab);
     return `<button type="button" role="tab" data-tab="${tab}" aria-selected="${state.tab === tab}">${esc(L(`tab_${tab}`))}${c !== undefined ? `<span class="count">${c}</span>` : ''}</button>`;
@@ -246,7 +261,7 @@ function renderResults() {
 
 function renderPanel() {
   const fn = {
-    risks: panelRisks, traffic: panelTraffic, sdks: panelSdks, permissions: panelPermissions, endpoints: panelEndpoints, declared: panelDeclared,
+    risks: panelRisks, traffic: panelTraffic, apps: panelApps, sdks: panelSdks, permissions: panelPermissions, endpoints: panelEndpoints, declared: panelDeclared,
     details: panelDetails, policy: panelPolicy, export: panelExport,
   }[state.tab];
   $('r-panel').innerHTML = fn();
@@ -493,6 +508,34 @@ function panelTraffic() {
       <div class="table-wrap"><table><thead><tr><th>${esc(L('colFirstSeen'))}</th><th>${esc(L('colRequest'))}</th></tr></thead><tbody>
       ${t.http.slice(0, 200).map((q) => `<tr><td>${q.relTs ?? '—'}s</td><td><code>${esc(q.method)} ${esc(q.host)}${esc(q.path)}</code>${q.body ? `<p class="excerpt">${esc(q.body.slice(0, 600))}</p>` : ''}</td></tr>`).join('')}
       </tbody></table></div>` : ''}`;
+}
+
+const fmtDate = (iso) => (iso ? new Date(iso).toLocaleString(state.lang === 'zh' ? 'zh-CN' : 'en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '?');
+
+// iPhone App Privacy Report: one row per app, expandable to its domains and data access.
+function panelApps() {
+  const rep = state.result.privacyReport;
+  const apps = rep.apps.filter((a) => a.appDomains || a.access.length);
+  const accessPills = (a) => a.access.map((c) => `<span class="pill ${['camera', 'microphone', 'location', 'contacts', 'screenRecording'].includes(c.category) ? 'warn' : ''}">${esc(L(`access_${c.category}`) || c.category)}</span>`).join(' ');
+  const domainRow = (d) => `<tr>
+      <td><code>${esc(d.domain)}</code>${d.userInitiated && !d.appInitiated ? ` <span class="pill">${esc(L('userOpened'))}</span>` : ''}${d.owner ? `<div class="sub">${esc(d.owner)}</div>` : ''}</td>
+      <td>${d.cnIndicators.map((i) => `<span class="pill cn">CN</span> <span class="sub">${esc(i.operator ? `${i.operator}: ` : '')}${esc(cnText(i.text))}</span>`).join('<br>')}${d.sdk ? `<div class="sub">${esc(pick(d.sdk.name))}</div>` : ''}${d.tracker ? ` <span class="pill warn">${esc(L('appleFlagged'))}</span>` : ''}</td>
+      <td>${esc(d.hits)}</td><td class="sub">${esc(fmtDate(d.first ? new Date(d.first).toISOString() : null))}<br>${esc(fmtDate(d.last ? new Date(d.last).toISOString() : null))}</td>
+    </tr>`;
+  const accessRows = (a) => a.access.length ? `<p class="small">${a.access.map((c) => `${esc(L(`access_${c.category}`) || c.category)}: ${esc(L('accessTimes', { n: c.count }))}${c.last ? ` · ${esc(L('lastUsed'))} ${esc(fmtDate(new Date(c.last).toISOString()))}` : ''}`).join('<br>')}</p>` : '';
+  const summaryPills = (a) => [
+    `<span class="pill">${esc(L('nDomains', { n: a.appDomains }))}</span>`,
+    a.cnDomains ? `<span class="pill cn">${esc(L('nCn', { n: a.cnDomains }))}</span>` : '',
+    a.trackers ? `<span class="pill warn">${esc(L('nFlagged', { n: a.trackers }))}</span>` : '',
+    accessPills(a),
+  ].filter(Boolean).join(' ');
+  return `<p class="note-line">${esc(L('aprIntro'))}</p>
+    ${apps.map((a) => `<details class="card app-card">
+      <summary><code>${esc(a.bundleId)}</code><span class="app-pills">${summaryPills(a)}</span></summary>
+      ${accessRows(a)}
+      <div class="table-wrap"><table><thead><tr><th>${esc(L('colHost'))}</th><th>${esc(L('colOperator'))}</th><th>${esc(L('colHits'))}</th><th>${esc(L('colFirstLast'))}</th></tr></thead>
+      <tbody>${a.domains.map(domainRow).join('')}</tbody></table></div>
+    </details>`).join('')}`;
 }
 
 function panelDetails() {
