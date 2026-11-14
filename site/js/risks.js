@@ -137,10 +137,17 @@ export function buildRisks(r, ctx, policy) {
   {
     const signals = [];
     const players = sdk('video-player');
+    // A generic player (e.g., ExoPlayer) in a game usually plays video ads, not content the user
+    // chooses to watch. Dedicated VOD players, or a video/social app, make this area relevant.
+    const VOD = new Set(['tencent_liteav', 'aliyun_player', 'bytedance_ttvideo', 'ijkplayer']);
+    const vodPlayers = players.filter((p) => VOD.has(p.id));
+    const videoApp = ['video', 'social'].includes(ctx.category);
+    const relevant = videoApp || vodPlayers.length > 0;
     if (players.length) signals.push(S(`Video player SDK(s): ${names(players)}.`, `视频播放 SDK：${names(players, 'zh')}。`));
-    if ((players.length || ctx.category === 'video') && tracking.length) signals.push(S(`Video playback plus ${tracking.length} tracking SDK(s) (${names(tracking)}).`, `视频播放同时包含 ${tracking.length} 个跟踪 SDK（${names(tracking, 'zh')}）。`));
+    if (relevant && tracking.length) signals.push(S(`Video playback plus ${tracking.length} tracking SDK(s) (${names(tracking)}).`, `视频播放同时包含 ${tracking.length} 个跟踪 SDK（${names(tracking, 'zh')}）。`));
+    if (players.length && !relevant) signals.push(S('In a non-video app a general-purpose player is often used for video ads; set the category to Video if users watch shows here.', '在非视频类应用中，通用播放器通常用于视频广告；如用户在此观看节目，请将类别设为“视频”。'));
     areas.push({
-      id: 'vppa', title: S('Video viewing data (VPPA)', '视频观看数据（VPPA）'), signals, needsContext: !players.length && ctx.category !== 'video',
+      id: 'vppa', title: S('Video viewing data (VPPA)', '视频观看数据（VPPA）'), signals, needsContext: !relevant,
       why: S('The Video Privacy Protection Act (18 U.S.C. § 2710; $2,500 liquidated damages per person) has been used against apps that send what a user watched together with a persistent identifier to ad or analytics partners. Short-drama and video apps fit this pattern.',
         '《视频隐私保护法》（18 U.S.C. § 2710；每人 2500 美元约定赔偿）曾被用于起诉将用户观看内容与持久标识符一并发送给广告或统计合作方的应用。短剧和视频应用符合这一模式。'),
       refs: [['18 U.S.C. § 2710 (Cornell LII)', 'https://www.law.cornell.edu/uscode/text/18/2710']],
@@ -223,6 +230,18 @@ export function buildRisks(r, ctx, policy) {
     for (const n of ['android.permission.QUERY_ALL_PACKAGES', 'android.permission.REQUEST_INSTALL_PACKAGES', 'android.permission.SYSTEM_ALERT_WINDOW', 'android.permission.READ_SMS', 'android.permission.READ_CALL_LOG', 'android.permission.READ_CONTACTS', 'android.permission.READ_PHONE_STATE']) {
       if (perm(n)) signals.push(S(`Requests ${n.split('.').pop()}.`, `请求 ${n.split('.').pop()}。`));
     }
+    const queried = android?.queriedPackages ?? [];
+    if (queried.length >= 10) {
+      const seen = new Set();
+      const sample = queried.filter((q) => {
+        const k = q.split('.').slice(0, 2).join('.');
+        if (/^com\.(google|android)$/.test(k) || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      }).slice(0, 8).join(', ');
+      signals.push(S(`Declares checks for whether ${queried.length} other apps are installed (e.g. ${sample}). Lists of installed apps can reveal interests and identity.`, `声明检测 ${queried.length} 个其他应用是否已安装（如 ${sample}）。已安装应用列表可能透露用户兴趣和身份。`));
+    }
+    if ((r.ios?.queriesSchemes?.length ?? 0) >= 10) signals.push(S(`Checks for ${r.ios.queriesSchemes.length} other apps via URL schemes.`, `通过 URL Scheme 检测 ${r.ios.queriesSchemes.length} 个其他应用。`));
     const comps = android?.components ?? [];
     if (comps.some((c) => c.permission === 'android.permission.BIND_ACCESSIBILITY_SERVICE')) signals.push(S('Declares an accessibility service (can read screen content and act on other apps).', '声明了无障碍服务（可读取屏幕内容并操作其他应用）。'));
     if (comps.some((c) => c.permission === 'android.permission.BIND_DEVICE_ADMIN')) signals.push(S('Declares a device-administrator receiver.', '声明了设备管理器接收器。'));
