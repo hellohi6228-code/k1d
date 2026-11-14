@@ -196,10 +196,13 @@ textarea.policy { width: 100%; min-height: 200px; resize: vertical; }
 .note.risk-none { border-left: 4px solid var(--ok); }
 .note h4 { margin-top: 12px; }
 .note .cite a { color: var(--accent); }
-.how { margin-top: 18px; }
-.how .kv dt { font-weight: 600; color: var(--text, inherit); }
-@media (max-width: 560px) { .how .kv { grid-template-columns: 1fr; } .how .kv dd { margin-bottom: 8px; } }
 .app-card summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
 .app-card summary code { overflow-wrap: anywhere; }
 .app-card .app-pills { display: flex; flex-wrap: wrap; gap: 4px; }
 .app-card[open] summary { margin-bottom: 10px; }
+.guides { margin-top: 18px; }
+.guides details { border-top: 1px solid var(--border); padding: 10px 0; }
+.guides summary { cursor: pointer; font-weight: 600; }
+.guides .steps { margin: 8px 0; padding-left: 22px; }
+.guides .steps li { margin: 6px 0; line-height: 1.5; }
+.guides code { overflow-wrap: anywhere; }

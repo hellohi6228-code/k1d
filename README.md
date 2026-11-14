@@ -79,6 +79,10 @@ node scripts/check-claims.mjs
 
 `check-claims` fails the build if the site contains verdict language ("violates", "compliant", 违法, 合规, …).
 
+## Step-by-step guides
+
+The home page has numbered guides (EN/ZH) for: iPhone App Privacy Report, getting an Android .apk (adb or a backup app), recording Android traffic with PCAPdroid, Windows, Mac, recording computer traffic with Wireshark, and scanning your own builds. The text lives in `site/js/guides.js`.
+
 ## Capturing an app's traffic
 
 - **Android phone:** the free PCAPdroid app captures without root. Export as `.pcap` and drop it here.

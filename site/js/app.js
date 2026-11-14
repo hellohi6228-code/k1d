@@ -5,6 +5,7 @@ import { TERMS, TERMS_VERSION, t } from './i18n.js';
 import { checkPolicy } from './policy.js';
 import { buildRisks, LIMITATIONS } from './risks.js';
 import { inferProfile, SYSTEM_HOSTS } from './profile.js';
+import { GUIDES } from './guides.js';
 
 const MAX_HASH_BYTES = 512 * 1024 * 1024;
 const $ = (id) => document.getElementById(id);
@@ -62,9 +63,25 @@ function show(view) {
   window.scrollTo({ top: 0 });
 }
 
+// **bold** and `code` in guide text; everything else is escaped.
+const fmtGuide = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`(.+?)`/g, '<code>$1</code>');
+
+function renderGuides() {
+  const g = GUIDES[state.lang];
+  const open = new Set([...document.querySelectorAll('#guides details[open]')].map((d) => d.id));
+  $('guides').innerHTML = `<h3 id="guides-title">${esc(g.title)}</h3><p class="muted small">${esc(g.intro)}</p>
+    ${g.list.map((x) => `<details id="guide-${x.id}" ${open.has(`guide-${x.id}`) ? 'open' : ''}>
+      <summary>${esc(x.title)}</summary>
+      <p class="small">${fmtGuide(x.what)}</p>
+      <ol class="steps">${x.steps.map((s) => `<li>${fmtGuide(s)}</li>`).join('')}</ol>
+      ${x.note ? `<p class="muted small">${fmtGuide(x.note)}</p>` : ''}
+    </details>`).join('')}`;
+}
+
 function applyStatic() {
   document.documentElement.lang = state.lang === 'zh' ? 'zh-CN' : 'en';
   for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = L(el.dataset.i18n);
+  renderGuides();
   for (const b of document.querySelectorAll('[data-lang]')) b.setAttribute('aria-pressed', String(b.dataset.lang === state.lang));
 }
 
