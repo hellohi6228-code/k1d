@@ -21,6 +21,11 @@ export function buildRisks(r, ctx, policy) {
   const ios = r.ios;
   const android = r.android;
   const highSecrets = (r.secrets ?? []).filter((s) => s.level === 'high');
+  // Network capture helpers (r.traffic exists only for .pcap/.pcapng input)
+  const tHosts = r.traffic?.hosts ?? [];
+  const kb = (n) => `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB`;
+  const before = (h) => ctx.consentAt != null && h.relFirst != null && h.relFirst < ctx.consentAt;
+  const sdkHost = (h, list) => list.some((s) => s.evidence.some((e) => e.type === 'traffic' && e.samples.includes(h.host)));
 
   // 1 ── Foreign-adversary data transfers
   {
@@ -31,6 +36,13 @@ export function buildRisks(r, ctx, policy) {
     if (listed.length) signals.push(S(`SDK vendor(s) noted on U.S. government lists in the knowledge base: ${names(listed)} (verify current status).`, `知识库标注列入美国政府名单的 SDK 提供方：${names(listed, 'zh')}（需核实当前状态）。`));
     const prcAi = r.sdks.filter((s) => s.category === 'ai' && s.cnNexus);
     if (prcAi.length) signals.push(S(`AI model endpoints operated by PRC-headquartered companies: ${names(prcAi)}. User prompts may be sent there.`, `由总部在中国的公司运营的 AI 模型接口：${names(prcAi, 'zh')}。用户输入可能被发送至这些接口。`));
+    const cnLive = tHosts.filter((h) => h.cnIndicators.length && h.flows > 0);
+    if (cnLive.length) {
+      const up = cnLive.reduce((n, h) => n + h.up, 0);
+      signals.push(S(`At runtime the device connected to ${cnLive.length} host(s) with China-nexus indicators and sent ${kb(up)} to them (${cnLive.slice(0, 4).map((h) => h.host).join(', ')}).`, `运行时设备连接了 ${cnLive.length} 个带中国关联指标的主机，并向其发送了 ${kb(up)}（${cnLive.slice(0, 4).map((h) => h.host).join('、')}）。`));
+      const pre = cnLive.filter(before);
+      if (pre.length) signals.push(S(`${pre.length} of them were contacted before the consent time you entered (${ctx.consentAt}s): ${pre.slice(0, 4).map((h) => h.host).join(', ')}.`, `其中 ${pre.length} 个在您填写的同意时间（${ctx.consentAt} 秒）之前即被连接：${pre.slice(0, 4).map((h) => h.host).join('、')}。`));
+    }
     areas.push({
       id: 'foreign_data', title: S('Data transfers to countries of concern', '向受关注国家传输数据'), signals,
       why: S('The DOJ Data Security Program restricts giving covered persons or countries of concern access to bulk U.S. sensitive data (deadline Oct 6, 2025). PADFA bars data brokers from selling or providing sensitive data to foreign-adversary-controlled entities; the FTC sent warning letters in Feb 2026. Several state AGs (KY, AZ, TX, OK, IA, MO) have sued Temu over data practices; the Texas settlement requires U.S. storage and disclosure of offshore sharing.',
@@ -97,6 +109,12 @@ export function buildRisks(r, ctx, policy) {
     if (replay.length) signals.push(S(`Session-replay SDK(s) that can record screens and inputs: ${names(replay)}.`, `可录制屏幕和输入的会话回放 SDK：${names(replay, 'zh')}。`));
     if (tracking.length) signals.push(S(`${tracking.length} advertising/analytics/attribution SDK(s): ${names(tracking)}.`, `${tracking.length} 个广告/统计/归因 SDK：${names(tracking, 'zh')}。`));
     if (r.capabilities.declaresTracking) signals.push(S('Privacy manifests declare tracking.', '隐私清单声明了跟踪。'));
+    if (tHosts.length) {
+      const live = tHosts.filter((h) => h.flows > 0 && sdkHost(h, tracking));
+      if (live.length) signals.push(S(`Tracking SDK hosts contacted at runtime: ${live.slice(0, 6).map((h) => h.host).join(', ')}.`, `运行时连接的跟踪 SDK 主机：${live.slice(0, 6).map((h) => h.host).join('、')}。`));
+      const pre = live.filter(before);
+      if (pre.length) signals.push(S(`${pre.length} tracking host(s) were contacted before the consent time you entered (${ctx.consentAt}s): ${pre.slice(0, 6).map((h) => h.host).join(', ')}.`, `${pre.length} 个跟踪主机在您填写的同意时间（${ctx.consentAt} 秒）之前即被连接：${pre.slice(0, 6).map((h) => h.host).join('、')}。`));
+    }
     areas.push({
       id: 'wiretap', title: S('Wiretap and pen-register claims (tracking SDKs)', '窃听与“笔式记录器”诉讼（跟踪 SDK）'), signals,
       why: S('Plaintiffs use California\'s Invasion of Privacy Act (CIPA §§ 631, 638.51; statutory damages of $5,000 per claim) and the federal Wiretap Act against embedded SDKs. A federal court let a claim that InMobi\'s ad SDK is a "pen register" proceed; a Los Angeles court ruled the other way in May 2026, so the law is unsettled. Washington\'s first My Health My Data class action (Feb 2025) also targets an ad SDK.',

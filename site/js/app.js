@@ -32,7 +32,7 @@ const pick = (obj) => (obj ? obj[state.lang] ?? obj.en : '');
 const isIos = () => Boolean(state.result?.ios); // iOS and macOS app bundles
 const PLATFORM_LABELS = {
   android: 'Android', ios: 'iOS', macos: 'macOS', windows: 'Windows', linux: 'Linux', harmonyos: 'HarmonyOS',
-  'browser-extension': 'Browser extension', miniprogram: 'WeChat mini-program', electron: 'Electron', archive: 'Archive', unknown: 'Unknown',
+  'browser-extension': 'Browser extension', miniprogram: 'WeChat mini-program', electron: 'Electron', archive: 'Archive', unknown: 'Unknown', traffic: 'Network capture',
 };
 
 // Knowledge-base indicator texts are stored in English; translate the known patterns for ZH.
@@ -200,6 +200,7 @@ function stats(r) {
 }
 
 function tabs() {
+  if (state.result.traffic) return ['risks', 'traffic', 'sdks', 'endpoints', 'policy', 'export'];
   const list = ['risks', 'sdks', 'permissions', 'endpoints'];
   if (isIos()) list.push('declared');
   list.push('details', 'policy', 'export');
@@ -211,6 +212,7 @@ function tabCount(tab) {
   return {
     sdks: r.sdks.length, permissions: r.permissions.length, endpoints: r.endpoints.length,
     declared: r.ios ? r.ios.declaredData.length : undefined, risks: currentRisks().filter((a) => a.status === 'signals').length,
+    traffic: r.traffic ? r.traffic.hosts.filter((h) => h.flows > 0).length : undefined,
   }[tab];
 }
 
@@ -223,7 +225,9 @@ function renderResults() {
   const platform = `${PLATFORM_LABELS[r.platform] ?? r.platform} · ${String(r.container).toUpperCase()}`;
   const id = r.app.id ?? state.file.name;
   $('r-title').innerHTML = `<span class="platform">${esc(platform)}</span>${r.app.name && r.app.name !== id ? `${esc(r.app.name)} ` : ''}<span class="${r.app.name && r.app.name !== id ? 'muted' : ''}">${esc(id)}</span> <span class="muted">${esc(r.app.versionName ?? '')}${r.app.versionCode != null ? ` (${esc(r.app.versionCode)})` : ''}</span>`;
-  const minLine = r.platform === 'android'
+  const minLine = r.traffic
+    ? L('trafficMeta', { packets: r.traffic.packets, s: r.traffic.duration ?? '?', flows: r.traffic.flows })
+    : r.platform === 'android'
     ? L('minTarget', { min: r.app.minSdk ?? '?', target: r.app.targetSdk ?? '?' })
     : r.ios ? L('minIos', { min: r.app.minSdk ?? '?', target: r.app.targetSdk ?? '?' })
       : r.app.publisher ? `${L('publisher')}: ${r.app.publisher}` : '';
@@ -242,7 +246,7 @@ function renderResults() {
 
 function renderPanel() {
   const fn = {
-    risks: panelRisks, sdks: panelSdks, permissions: panelPermissions, endpoints: panelEndpoints, declared: panelDeclared,
+    risks: panelRisks, traffic: panelTraffic, sdks: panelSdks, permissions: panelPermissions, endpoints: panelEndpoints, declared: panelDeclared,
     details: panelDetails, policy: panelPolicy, export: panelExport,
   }[state.tab];
   $('r-panel').innerHTML = fn();
@@ -448,6 +452,44 @@ function secretsCard() {
     </tbody></table></div></div>`;
 }
 
+const fmtKB = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${(n / 1024).toFixed(1)} KB`);
+const SYSTEM_HOSTS = /(^|\.)(gstatic\.com|android\.apis\.google\.com|play\.googleapis\.com|android\.clients\.google\.com|connectivitycheck\.|mtalk\.google\.com|time\.android\.com|googleapis\.com)$/;
+
+function consentInput() {
+  return `<div class="card"><label class="context">${esc(L('consentAtLabel'))}
+    <input type="number" min="0" step="1" id="ctx-consent" style="width:110px" value="${state.context.consentAt ?? ''}" placeholder="${esc(L('seconds'))}"></label>
+    <p class="muted small" style="margin:8px 0 0">${esc(L('consentAtNote'))}</p></div>`;
+}
+
+function panelTraffic() {
+  const t = state.result.traffic;
+  const sdkFor = new Map();
+  for (const s of state.result.sdks) for (const e of s.evidence) if (e.type === 'traffic') for (const h of e.samples) sdkFor.set(h, pick(s.name));
+  const rows = t.hosts.filter((h) => h.flows > 0 || h.protocols.includes('DNS only'));
+  const cAt = state.context.consentAt;
+  return `<div class="stats">
+      <div class="stat"><div class="n">${t.hosts.filter((h) => h.flows > 0).length}</div><div class="l">${esc(L('hostsContacted'))}</div></div>
+      <div class="stat ${t.hosts.some((h) => h.cnIndicators.length && h.flows) ? 'cn' : ''}"><div class="n">${t.hosts.filter((h) => h.cnIndicators.length && h.flows).length}</div><div class="l">${esc(L('cnHostsContacted'))}</div></div>
+      <div class="stat"><div class="n">${esc(fmtKB(t.upTotal))}</div><div class="l">${esc(L('bytesSent'))}</div></div>
+      <div class="stat"><div class="n">${esc(fmtKB(t.downTotal))}</div><div class="l">${esc(L('bytesReceived'))}</div></div>
+    </div>
+    ${consentInput()}
+    <p class="note-line">${esc(L('trafficNote'))}</p>
+    <div class="table-wrap"><table>
+    <thead><tr><th>${esc(L('colFirstSeen'))}</th><th>${esc(L('colHost'))}</th><th>${esc(L('colOperator'))}</th><th>${esc(L('colProtocol'))}</th><th>${esc(L('colSent'))}</th><th>${esc(L('colReceived'))}</th></tr></thead>
+    <tbody>${rows.map((h) => `<tr>
+      <td>${h.relFirst != null ? `${h.relFirst}s` : '—'}${cAt != null && h.relFirst != null && h.relFirst < cAt ? ` <span class="pill warn">${esc(L('beforeConsent'))}</span>` : ''}</td>
+      <td><code>${esc(h.host)}</code>${SYSTEM_HOSTS.test(h.host) ? ` <span class="pill">${esc(L('systemHost'))}</span>` : ''}<div class="sub">${esc(h.ips.slice(0, 2).join(', '))}</div></td>
+      <td>${h.cnIndicators.map((i) => `<span class="pill cn">CN</span> <span class="sub">${esc(i.operator ? `${i.operator}: ` : '')}${esc(cnText(i.text))}</span>`).join('<br>') || ''}${sdkFor.has(h.host) ? `<div class="sub">${esc(sdkFor.get(h.host))}</div>` : ''}${!h.cnIndicators.length && !sdkFor.has(h.host) ? '<span class="muted">—</span>' : ''}</td>
+      <td class="sub">${esc(h.protocols.join(', '))}</td>
+      <td>${esc(fmtKB(h.up))}</td><td>${esc(fmtKB(h.down))}</td>
+    </tr>`).join('')}</tbody></table></div>
+    ${t.http.length ? `<h3 style="margin-top:18px">${esc(L('cleartextRequests'))} (${t.http.length})</h3>
+      <div class="table-wrap"><table><thead><tr><th>${esc(L('colFirstSeen'))}</th><th>${esc(L('colRequest'))}</th></tr></thead><tbody>
+      ${t.http.slice(0, 200).map((q) => `<tr><td>${q.relTs ?? '—'}s</td><td><code>${esc(q.method)} ${esc(q.host)}${esc(q.path)}</code>${q.body ? `<p class="excerpt">${esc(q.body.slice(0, 600))}</p>` : ''}</td></tr>`).join('')}
+      </tbody></table></div>` : ''}`;
+}
+
 function panelDetails() {
   const r = state.result;
   let main;
@@ -508,6 +550,7 @@ function panelRisks() {
       <label>${esc(L('category'))} <select id="ctx-category">${CONTEXT_CATEGORIES.map((c) => `<option value="${c}" ${state.context.category === c ? 'selected' : ''}>${esc(L(`cat_${c}`))}</option>`).join('')}</select></label>
       <label><input type="checkbox" id="ctx-child" ${state.context.childDirected ? 'checked' : ''}> ${esc(L('childDirected'))}</label>
     </div></div>
+    ${state.result.traffic ? consentInput() : ''}
     <p class="note-line">${esc(L('riskSummary', { n, total: areas.length }))}</p>
     ${risksHtml(areas)}
     ${limitationsHtml()}`;
@@ -541,6 +584,7 @@ function bindPanel() {
   $('policy-text')?.addEventListener('input', (e) => { state.policyText = e.target.value; });
   $('ctx-category')?.addEventListener('change', (e) => { state.context.category = e.target.value; renderResults(); });
   $('ctx-child')?.addEventListener('change', (e) => { state.context.childDirected = e.target.checked; renderResults(); });
+  $('ctx-consent')?.addEventListener('change', (e) => { const v = e.target.value.trim(); state.context.consentAt = v === '' ? null : Number(v); renderResults(); });
   $('dl-json')?.addEventListener('click', downloadJson);
   $('do-print')?.addEventListener('click', printReport);
 }

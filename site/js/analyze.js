@@ -12,6 +12,7 @@ import { signerCertFromPkcs7 } from './cert.js';
 import { isPE } from './pe.js';
 import { isCFB } from './cfb.js';
 import { isXar, collectPkg } from './pkg.js';
+import { isPcap, analyzePcap, hostsFromFlows } from './pcap.js';
 import {
   collectPE, collectMsix, collectMsi, collectELF, collectDeb, collectRpm, collectAsar, collectHarmony,
   collectExtension, crxZipOffset, isWxapkg, collectWxapkg, collectGeneric, collectNestedZip, offsetSource, scanBinary,
@@ -328,11 +329,12 @@ function detectSdks(facts, kb, hosts) {
     }
     for (const suffix of sdk.domains ?? []) {
       const matched = hosts.filter((h) => hostMatches(h, suffix));
-      if (matched.length) evidence.push({ type: 'domain', signature: suffix, samples: matched.slice(0, 5) });
+      // In a network capture the host was actually contacted, which is stronger than a string in the file.
+      if (matched.length) evidence.push({ type: facts.platform === 'traffic' ? 'traffic' : 'domain', signature: suffix, samples: facts.platform === 'traffic' ? matched : matched.slice(0, 5) });
     }
     if (!evidence.length) continue;
     const kinds = new Set(evidence.map((e) => e.type));
-    const strong = kinds.has('framework') || kinds.has('file') || kinds.has('package') || codeHits >= 3;
+    const strong = kinds.has('framework') || kinds.has('file') || kinds.has('package') || kinds.has('traffic') || codeHits >= 3;
     const medium = ['code', 'ios_class', 'native', 'manifest', 'plist_key', 'url_scheme', 'config_key', 'entitlement'].some((k) => kinds.has(k));
     let confidence = 'low';
     if (strong || (medium && kinds.size >= 2)) confidence = 'high';
@@ -471,7 +473,19 @@ export async function analyzeSource(source, kb, { onProgress } = {}) {
   let container;
   const big = source.size > MAX_WHOLE_FILE;
 
-  if (isPE(head) && !big) { await collectPE(source, facts, ctx); container = 'exe'; }
+  if (isPcap(head) && !big) {
+    const t = analyzePcap(await source.read(0, source.size));
+    facts.platform = 'traffic';
+    facts.app = { id: null, name: null, versionName: null, versionCode: null, minSdk: null, targetSdk: null };
+    const hostsT = hostsFromFlows(t.flows, t.dns);
+    for (const h of hostsT) if (/[a-z]/i.test(h.host)) ctx.addUrls(`https://${h.host}/`, 'network capture');
+    for (const f of t.flows) for (const r of f.http) {
+      ctx.addUrls(`http://${r.host || f.ip}${r.path}`, 'cleartext HTTP');
+      ctx.scanText(`${r.path}\n${r.body}`, `HTTP ${r.method} ${r.host}`);
+    }
+    facts.traffic = { ...t, hosts: hostsT };
+    container = new DataView(head.buffer, head.byteOffset, 4).getUint32(0, true) === 0x0a0d0d0a ? 'pcapng' : 'pcap';
+  } else if (isPE(head) && !big) { await collectPE(source, facts, ctx); container = 'exe'; }
   else if (isCFB(head) && !big) { await collectMsi(source, facts, ctx); container = 'msi'; }
   else if (ascii.startsWith('\x7fELF') && !big) { await collectELF(source, facts, ctx, 'executable'); facts.app.id = null; facts.app.name = null; container = 'elf'; }
   else if (ascii.startsWith('!<arch>\n') && !big) { await collectDeb(source, facts, ctx); container = 'deb'; }
@@ -508,6 +522,27 @@ export async function analyzeSource(source, kb, { onProgress } = {}) {
 
   progress({ step: 'detect' });
   const endpoints = classifyEndpoints(facts, kb.infra, kb.sdks);
+  let traffic = null;
+  if (facts.traffic) {
+    const t = facts.traffic;
+    const ep = new Map(endpoints.map((e) => [e.host, e]));
+    const hostsOut = t.hosts.map((h) => {
+      const e = ep.get(h.host);
+      return { ...h, relFirst: t.start ? +(h.first - t.start).toFixed(1) : null, cnIndicators: e?.cnIndicators ?? [], operator: e?.operator ?? null };
+    });
+    for (const e of endpoints) {
+      const h = hostsOut.find((x) => x.host === e.host);
+      if (h) e.traffic = { up: h.up, down: h.down, relFirst: h.relFirst, protocols: h.protocols };
+    }
+    traffic = {
+      packets: t.packets, parsedPackets: t.parsedPackets, links: t.links, start: t.start, end: t.end,
+      duration: t.start && t.end ? +(t.end - t.start).toFixed(1) : null, device: t.device,
+      flows: t.flows.length, hosts: hostsOut, dnsQueries: t.dns.length,
+      http: t.flows.flatMap((f) => f.http.map((r) => ({ ...r, ip: f.ip, relTs: t.start ? +(r.ts - t.start).toFixed(1) : null }))),
+      upTotal: t.flows.reduce((n, f) => n + f.up, 0), downTotal: t.flows.reduce((n, f) => n + f.down, 0),
+    };
+    if (!t.parsedPackets) facts.limits.push({ en: 'No IP packets could be decoded from this capture (unsupported link type or encrypted Wi-Fi frames).', zh: '无法从该抓包中解码 IP 数据包（不支持的链路类型或加密的 Wi-Fi 帧）。' });
+  }
   const sdks = detectSdks(facts, kb.sdks, endpoints.map((e) => e.host));
   const permissions = [...buildPermissions(facts, kb.permissions), ...(facts.ios ? facts.permissionList : [])];
 
@@ -587,6 +622,7 @@ export async function analyzeSource(source, kb, { onProgress } = {}) {
     npmPackages: [...facts.npm].sort(),
     android,
     ios,
+    traffic,
     details: facts.details,
     limits: facts.limits,
     files: facts.fileCount,
