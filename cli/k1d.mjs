@@ -4,11 +4,18 @@
 //   k1d scan  <app> [--recording <pcap|ndjson>] [--json <out.json>] [--snapshot <out.json>]
 //   k1d diff  <old.apk|old.json> <new.apk|new.json> [--markdown]
 //   k1d check <app> --baseline <baseline.json> [--fail-on a,b] [--update-baseline]   (Pro license)
+//   k1d report <app> [--recording f] --out report.html [--brand "Firm"]             (Pro; --brand needs Enterprise)
+//   k1d watch <watchlist.json> [--state watch-state.json] [--snapshots dir]          (Monitoring)
+//   k1d portfolio <snapshot dir|files…> --out dashboard.html [--brand "Group"]        (Enterprise)
 //   k1d license                                                                      (show the K1D_LICENSE in use)
 //
-// scan and diff are free. check is the release gate for build pipelines and needs a Pro, Monitoring
-// or Enterprise license key in K1D_LICENSE (or --license).
+// scan and diff are free. check and report need a Pro, Monitoring or Enterprise license key in
+// K1D_LICENSE (or --license); watch needs Monitoring or Enterprise; portfolio needs Enterprise.
 import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { renderReport } from './report.mjs';
+import { storeVersions, compareWatch, watchMarkdown, loadSnapshots, portfolioHtml } from './monitor.mjs';
 import { scanFile, snapshot, diffSnapshots, applyPolicy, changesMarkdown, loadSnapshotOrScan, DEFAULT_FAIL_ON } from './lib.mjs';
 import { verifyLicense } from './license.mjs';
 
@@ -25,6 +32,15 @@ for (let i = 1; i < argv.length; i++) {
   } else pos.push(a);
 }
 const out = (s) => process.stdout.write(`${s}\n`);
+function sha256File(f) {
+  const h = crypto.createHash('sha256');
+  const fd = fs.openSync(f, 'r');
+  const buf = Buffer.allocUnsafe(8 * 1024 * 1024);
+  let n;
+  while ((n = fs.readSync(fd, buf, 0, buf.length, null)) > 0) h.update(buf.subarray(0, n));
+  fs.closeSync(fd);
+  return h.digest('hex');
+}
 const fail = (msg, code = 2) => { process.stderr.write(`k1d: ${msg}\n`); process.exit(code); };
 const PUBLISHERS = 'https://hellohi6228-code.github.io/k1d/publishers.html';
 
@@ -74,13 +90,54 @@ async function main() {
     if (policy.pass && flags['update-baseline']) fs.writeFileSync(flags.baseline, `${JSON.stringify(b, null, 1)}\n`);
     process.exit(policy.pass ? 0 : 1);
   }
+  if (cmd === 'report') {
+    if (!pos[0] || !flags.out) fail('usage: k1d report <app> [--recording <file>] --out report.html [--json evidence.json] [--brand "Firm name"] [--brand-note "Matter 123"]');
+    const r = await scanFile(pos[0], { recording: flags.recording || null });
+    const lic = verifyLicense(flags.license || process.env.K1D_LICENSE, { appId: r.app?.id ?? null });
+    if (!lic.ok) fail(`${lic.reason}\n  k1d report is part of k1d Pro. Plans: ${PUBLISHERS}`, 3);
+    if (flags.brand && lic.license.plan !== 'enterprise') fail('--brand (white-label reports) needs an Enterprise license.', 3);
+    const files = [pos[0], flags.recording].filter((f) => typeof f === 'string').map((f) => ({ name: path.basename(f), size: fs.statSync(f).size, sha256: sha256File(f) }));
+    fs.writeFileSync(flags.out, renderReport(r, { files, brand: typeof flags.brand === 'string' ? flags.brand : null, brandNote: typeof flags['brand-note'] === 'string' ? flags['brand-note'] : null }));
+    if (flags.json) fs.writeFileSync(flags.json, JSON.stringify({ files, generatedAt: new Date().toISOString(), result: r }, null, 1));
+    out(`Wrote ${flags.out}${flags.json ? ` and ${flags.json}` : ''}. Open it in a browser and Print → Save as PDF.`);
+    return;
+  }
+  if (cmd === 'watch') {
+    if (!pos[0]) fail('usage: k1d watch <watchlist.json> [--state watch-state.json] [--snapshots dir]');
+    const list = JSON.parse(fs.readFileSync(pos[0], 'utf8')).apps;
+    const lic = verifyLicense(flags.license || process.env.K1D_LICENSE);
+    if (!lic.ok) fail(`${lic.reason}\n  k1d watch is part of k1d Monitoring. Plans: ${PUBLISHERS}`, 3);
+    if (!['monitoring', 'enterprise'].includes(lic.license.plan)) fail('k1d watch needs a Monitoring or Enterprise license.', 3);
+    const covered = (a) => lic.license.apps.includes('*') || lic.license.apps.includes(a);
+    const notCovered = list.filter((e) => !covered(e.app)).map((e) => e.app);
+    if (notCovered.length) fail(`The license does not cover: ${notCovered.join(', ')}`, 3);
+    const current = [];
+    for (const e of list) current.push(await storeVersions(e));
+    const stateFile = typeof flags.state === 'string' ? flags.state : 'k1d-watch-state.json';
+    const prev = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, 'utf8')) : {};
+    const { rows, state } = compareWatch(current, prev, loadSnapshots(typeof flags.snapshots === 'string' ? flags.snapshots : null));
+    fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 1)}\n`);
+    const md = watchMarkdown(rows, current.flatMap((c) => c.errors.map((e) => `${c.app}: ${e}`)));
+    out(md);
+    if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${md}\n`);
+    process.exit(rows.some((r) => !r.checked && r.isNew) ? 1 : 0);
+  }
+  if (cmd === 'portfolio') {
+    if (!pos.length || !flags.out) fail('usage: k1d portfolio <snapshot dir|files…> --out dashboard.html [--brand "Group"]');
+    const lic = verifyLicense(flags.license || process.env.K1D_LICENSE);
+    if (!lic.ok || lic.license.plan !== 'enterprise') fail(`${lic.ok ? 'k1d portfolio needs an Enterprise license.' : lic.reason}\n  Plans: ${PUBLISHERS}`, 3);
+    const snaps = pos.flatMap((p) => loadSnapshots(p));
+    fs.writeFileSync(flags.out, portfolioHtml(snaps, { brand: typeof flags.brand === 'string' ? flags.brand : null }));
+    out(`Wrote ${flags.out} (${snaps.length} snapshots).`);
+    return;
+  }
   if (cmd === 'license') {
     const lic = verifyLicense(flags.license || process.env.K1D_LICENSE);
     if (!lic.ok) fail(lic.reason, 3);
     out(JSON.stringify(lic.license, null, 1));
     return;
   }
-  out('k1d: scan | diff | check | license. See cli/README.md.');
+  out('k1d: scan | diff | check | report | watch | portfolio | license. See cli/README.md.');
   process.exit(cmd ? 2 : 0);
 }
 

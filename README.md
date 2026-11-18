@@ -62,6 +62,9 @@ k1d reads an app or installer **in your browser** and shows what's inside it. It
 - **Plans and how to buy:** [publishers page](https://hellohi6228-code.github.io/k1d/publishers.html) (`site/publishers.html`). Contact details come from `site/js/config.js`.
 - **Command line and release check:** `cli/` (see [cli/README.md](cli/README.md)). `scan` and `diff` are free; `check` is the Pro release gate and needs a license key.
 - **GitHub Action:** `action.yml` at the repo root (`uses: hellohi6228-code/k1d@main`).
+- **Evidence reports, store watch, portfolio dashboard:** `k1d report`, `k1d watch`, `k1d portfolio` (see cli/README.md).
+- **Automated Android runtime test:** `tools/runtime/run.mjs` (emulator, netsim recording, scripted consent/age/explore scenarios, report).
+- **Bank-only billing:** `tools/business/billing.mjs` (invoices, bank-CSV matching, automatic license renewal, email drafts). Customer and bank data stay outside the repo.
 - **License keys:** issued with `tools/issue-license.mjs` using a private signing key kept outside the repo.
 
 ## Run locally

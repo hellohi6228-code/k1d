@@ -37,3 +37,58 @@ The license key goes in `K1D_LICENSE` (or `--license`). Keys are verified offlin
     baseline: k1d-baseline.json
     license: ${{ secrets.K1D_LICENSE }}
 ```
+
+## Evidence report (`k1d report`, Pro and up)
+
+```bash
+node cli/k1d.mjs report app.apk --recording capture.pcap --out report.html --json evidence.json
+node cli/k1d.mjs report app.apk --out report.html --brand "Example LLP" --brand-note "Matter 2026-17"   # Enterprise: white-label
+```
+
+One self-contained bilingual (EN/ZH) HTML file: input files with SHA-256, analyzer and knowledge-base versions, every risk area with findings / why it may matter / not scanned, runtime hosts with before-consent markers, SDKs (with "connected in recording"), China-linked endpoints, permissions, credentials (masked), coverage and limits. Print to PDF for counsel. `--json` writes the full result next to it.
+
+## Store watch (`k1d watch`, Monitoring and Enterprise)
+
+```bash
+node cli/k1d.mjs watch watchlist.json --state k1d-watch-state.json --snapshots snapshots/
+```
+
+`watchlist.json`: `{"apps": [{"app": "com.example.game", "iosId": 1234567890, "country": "us"}]}`. Reads the public Google Play listing and Apple's public lookup API (no app files are downloaded), compares with the last run, and marks each live version "checked by k1d" when a snapshot with that app ID and version exists. Exit code 1 when a new release went live without a check.
+
+Run it daily from GitHub Actions:
+
+```yaml
+on:
+  schedule: [{ cron: '0 13 * * *' }]
+  workflow_dispatch:
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { repository: hellohi6228-code/k1d, path: k1d }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node k1d/cli/k1d.mjs watch watchlist.json --state k1d-watch-state.json --snapshots snapshots
+        env: { K1D_LICENSE: '${{ secrets.K1D_LICENSE }}' }
+      - run: git config user.name k1d && git config user.email k1d@users.noreply.github.com && git add k1d-watch-state.json && git commit -m "store watch" || true && git push
+```
+
+A failed run sends GitHub's usual failure email: that is the alert.
+
+## Portfolio dashboard (`k1d portfolio`, Enterprise)
+
+```bash
+node cli/k1d.mjs portfolio snapshots/ --out dashboard.html --brand "Example Group"
+```
+
+One HTML page across every app's snapshots: latest version, SDK counts, China-nexus SDKs and hosts, risk areas with findings, and the changes since each app's previous check.
+
+## Automated Android runtime test (k1d staff, Health Check and Monitoring)
+
+```bash
+node tools/runtime/run.mjs app.apks --out runs/game-2026-11-18 --idle 60 --explore 300
+```
+
+Needs the Android SDK and an emulator (default AVD `k1d_Pixel`). Installs the app, clears its data, records Wi-Fi traffic through the emulator's netsim, runs: idle launch → decline consent → answer an age question with 12 → accept consent → random play (Android monkey), with a screenshot and timestamp for each step, then writes `recording.pcap`, `timeline.json`, `screens/` and `report.html`.
