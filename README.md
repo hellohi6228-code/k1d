@@ -57,6 +57,13 @@ k1d reads an app or installer **in your browser** and shows what's inside it. It
 - **Signing.** APK v1–v3, iOS/macOS code signing (Team ID, entitlements), Authenticode (signer chosen by serial number), MSIX, pkg.
 - **Privacy-policy check (EN/ZH)** and **export** (JSON, print to PDF).
 
+## For app publishers
+
+- **Plans and how to buy:** [publishers page](https://hellohi6228-code.github.io/k1d/publishers.html) (`site/publishers.html`). Contact details come from `site/js/config.js`.
+- **Command line and release check:** `cli/` (see [cli/README.md](cli/README.md)). `scan` and `diff` are free; `check` is the Pro release gate and needs a license key.
+- **GitHub Action:** `action.yml` at the repo root (`uses: hellohi6228-code/k1d@main`).
+- **License keys:** issued with `tools/issue-license.mjs` using a private signing key kept outside the repo.
+
 ## Run locally
 
 ```bash

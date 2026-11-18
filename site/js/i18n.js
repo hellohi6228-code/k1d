@@ -4,6 +4,8 @@
 export const STRINGS = {
   en: {
     tagline: 'Static evidence about apps on every platform',
+    forPublishers: 'For publishers',
+    ownAppCta: 'Is this your app? Check every release automatically before it ships →',
     heroTitle: "What's inside this app?",
     heroBody: 'Drop in an app or installer for any platform to see the SDKs it embeds, the personal data it can access, the servers it is set up to talk to, hard-coded credentials and China-nexus indicators, mapped to the US legal areas where China-linked apps have faced lawsuits. Everything runs in your browser: the file is never uploaded.',
     dropTitle: 'Drop an app or installer here',
@@ -282,6 +284,8 @@ export const STRINGS = {
 
   zh: {
     tagline: '全平台应用静态证据',
+    forPublishers: '发行商方案',
+    ownAppCta: '这是您的应用吗？在每次发布前自动检查 →',
     heroTitle: '这个应用里有什么？',
     heroBody: '拖入任意平台的应用或安装包，即可查看其嵌入的 SDK、可访问的个人数据、预设连接的服务器、硬编码凭据以及中国关联指标，并对应到中国关联应用在美国曾面临诉讼的法律领域。所有分析都在浏览器中完成，文件不会被上传。',
     dropTitle: '将应用或安装包拖到此处',

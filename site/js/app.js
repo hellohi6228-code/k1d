@@ -309,6 +309,7 @@ function renderResults() {
   $('r-addrec').innerHTML = state.appResult && !rt
     ? `<div class="card addrec"><div><strong>${esc(L('addRecTitle'))}</strong><p class="muted small" style="margin:4px 0 0">${esc(L('addRecBody'))}</p></div><button type="button" class="btn btn-secondary" id="addrec-btn">${esc(L('addRecButton'))}</button></div>`
     : '';
+  if (state.appResult) $('r-addrec').innerHTML += `<p class="small" style="margin:4px 0 10px"><a href="publishers.html">${esc(L('ownAppCta'))}</a></p>`;
   $('addrec-btn')?.addEventListener('click', () => $('rec-input').click());
   $('r-stats').innerHTML = stats(r).map((s) => `<div class="stat ${s.cls ?? ''}"><div class="n">${s.n}</div><div class="l">${esc(s.l)}</div></div>`).join('');
   const list = tabs();

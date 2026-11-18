@@ -207,3 +207,15 @@ textarea.policy { width: 100%; min-height: 200px; resize: vertical; }
 .guides .steps li { margin: 6px 0; line-height: 1.5; }
 .guides code { overflow-wrap: anywhere; }
 .addrec { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin: 12px 0; }
+.plans { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; margin: 12px 0; }
+.plan h3 { margin: 0 0 4px; }
+.plan .price { font-size: 26px; font-weight: 800; }
+.plan ul { padding-left: 18px; margin: 8px 0; }
+.plan li { margin: 4px 0; }
+#pub h2 { margin-top: 28px; }
+#pub details { border-top: 1px solid var(--border); padding: 8px 0; }
+#pub details summary { cursor: pointer; font-weight: 600; }
+.steps { padding-left: 22px; }
+.steps li { margin: 6px 0; line-height: 1.5; }
+.pub-link { font-size: 14px; font-weight: 600; color: var(--accent); text-decoration: none; margin-right: 12px; }
+.topbar-right { display: flex; align-items: center; }

@@ -1,0 +1,43 @@
+name: k1d release check
+description: Compare each app build with the last released one and stop the release when it adds China-linked SDKs or servers, credentials, tracking SDKs, high-risk permissions or consent defaults set to granted.
+author: k1d
+branding:
+  icon: shield
+  color: green
+inputs:
+  file:
+    description: Path to the built app (APK, AAB, IPA, EXE, MSI, PKG, …).
+    required: true
+  baseline:
+    description: Path to the baseline snapshot JSON in your repository. Created on the first run; commit it.
+    required: false
+    default: k1d-baseline.json
+  fail-on:
+    description: Comma-separated change kinds that fail the check. Default new-cn-sdk,new-cn-host,new-secret,new-tracking-sdk,new-high-permission,consent-default
+    required: false
+    default: ''
+  update-baseline:
+    description: Write the new snapshot to the baseline file when the check passes (commit it in a later step).
+    required: false
+    default: 'false'
+  license:
+    description: k1d Pro / Monitoring license key. Store it as a repository secret.
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+    - shell: bash
+      env:
+        K1D_LICENSE: ${{ inputs.license }}
+        K1D_FILE: ${{ inputs.file }}
+        K1D_BASELINE: ${{ inputs.baseline }}
+        K1D_FAIL_ON: ${{ inputs.fail-on }}
+        K1D_UPDATE: ${{ inputs.update-baseline }}
+      run: |
+        args=(check "$K1D_FILE" --baseline "$K1D_BASELINE")
+        if [ -n "$K1D_FAIL_ON" ]; then args+=(--fail-on "$K1D_FAIL_ON"); fi
+        if [ "$K1D_UPDATE" = "true" ]; then args+=(--update-baseline); fi
+        node "${{ github.action_path }}/cli/k1d.mjs" "${args[@]}"
