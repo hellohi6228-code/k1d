@@ -51,7 +51,7 @@ export const GUIDES = {
           'Go back to PCAPdroid and tap the **stop** button.',
           'The recording is saved in **Downloads** → **PCAPdroid** (older versions ask where to save it).',
           'Open this website on the phone and choose that `.pcap` file, or copy it to a computer and drop it in the box above.',
-          '**Best result:** select the app file (see the guide above) and the `.pcap` together. k1d then shows which of the SDKs built into the app actually connected. You can also add the recording later with **Add recording** on the app's result page.',
+          '**Best result:** select the app file (see the guide above) and the `.pcap` together. k1d then shows which of the SDKs built into the app actually connected. You can also add the recording later with **Add recording** on the app\'s result page.',
         ],
         note: 'The result lists every server the app contacted, when, and how much data went out. Encrypted contents are not visible. A recording can include identifiers from your phone, so don\'t share it.',
       },
