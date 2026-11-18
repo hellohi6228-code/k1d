@@ -5,6 +5,7 @@
 //
 //   node tools/runtime/run.mjs <app.apk|app.apks|app.xapk|split-folder> [--avd k1d_Pixel] [--out runs/<pkg>-<time>]
 //        [--scenarios idle,consent-decline,age,consent-accept,explore] [--idle 60] [--explore 300]
+//        [--taps "consent-accept=540,1512;consent-decline=300,1700"]   (tap positions for canvas-drawn UIs)
 //
 // Scenarios (in the order given):
 //   idle            launch from a cleared state and touch nothing for --idle seconds
@@ -106,7 +107,12 @@ async function netsimWifiCapture() {
   if (!wifi) throw new Error('netsim reports no capture-capable chip; is the emulator using netsim Wi-Fi?');
   return wifi.id;
 }
-const setCapture = (id, on) => fetch(`${NETSIM}/v1/captures/${id}`, { method: 'PATCH', body: on ? '1' : '0' });
+// netsim's HTTP server rejects Node fetch's PATCH body ("Incorrect state"); curl's form-encoded body works.
+const setCapture = async (id, on) => {
+  const r = spawnSync('curl', ['-s', '-X', 'PATCH', `${NETSIM}/v1/captures/${id}`, '-d', on ? '1' : '0'], { encoding: 'utf8' });
+  const ok = new RegExp(`"state": ${on ? 'true' : 'false'}`).test(r.stdout ?? '');
+  if (!ok) throw new Error(`netsim did not switch capture ${on ? 'on' : 'off'}: ${(r.stdout || r.stderr || '').slice(0, 120)}`);
+};
 
 // ---------------------------------------------------------------- main run
 export async function runScenarios(input, opts = {}) {
@@ -123,13 +129,18 @@ export async function runScenarios(input, opts = {}) {
   fs.mkdirSync(path.join(outDir, 'screens'), { recursive: true });
   const timeline = [];
   const mark = (event, detail = '') => { timeline.push({ t: new Date().toISOString(), event, detail }); console.log(`${new Date().toISOString()}  ${event}${detail ? `  ${detail}` : ''}`); };
-  const shot = (name) => fs.writeFileSync(path.join(outDir, 'screens', `${String(timeline.length).padStart(2, '0')}-${name}.png`), adbBuf('exec-out', 'screencap', '-p'));
+  let shots = 0;
+  const shot = (name) => fs.writeFileSync(path.join(outDir, 'screens', `${String(++shots).padStart(2, '0')}-${name}.png`), adbBuf('exec-out', 'screencap', '-p'));
 
   mark('emulator', avd);
   await ensureEmulator(avd);
-  mark('install', apks.map((f) => path.basename(f)).join(', '));
-  const inst = adb(apks.length > 1 ? 'install-multiple' : 'install', '-r', '-g', ...apks);
-  if (!/Success/.test(inst)) throw new Error(`install failed: ${inst}`);
+  const installed = adb('shell', 'dumpsys', 'package', pkg).match(/versionName=(\S+)/)?.[1];
+  if (installed && installed === appScan.app.versionName && opts.reuseInstall !== false) mark('install', `already installed: ${pkg} ${installed}`);
+  else {
+    mark('install', apks.map((f) => path.basename(f)).join(', '));
+    const inst = adb(apks.length > 1 ? 'install-multiple' : 'install', '-r', '-g', ...apks);
+    if (!/Success/.test(inst)) throw new Error(`install failed: ${inst}`);
+  }
   adb('shell', 'pm', 'clear', pkg);
   mark('app data cleared', pkg);
 
@@ -147,6 +158,12 @@ export async function runScenarios(input, opts = {}) {
       adb('shell', 'am', 'start', '-W', '-n', activity);
       for (const s of [5, 20, idle]) { await sleep((s - (s === 5 ? 0 : s === 20 ? 5 : 20)) * 1000); shot(`idle-${s}s`); }
       mark('idle end', `${idle}s without input`);
+    } else if (opts.taps?.[sc]) {
+      // Operator-given position, for UIs drawn on a game canvas that uiautomator cannot see.
+      const [x, y] = opts.taps[sc];
+      adb('shell', 'input', 'tap', String(x), String(y));
+      mark(sc, `tapped at ${x},${y} (position given by operator)`);
+      await sleep(4000); shot(sc);
     } else if (sc === 'consent-decline' || sc === 'consent-accept') {
       const re = sc === 'consent-decline' ? BUTTONS.decline : BUTTONS.accept;
       let done = false;
@@ -154,7 +171,7 @@ export async function runScenarios(input, opts = {}) {
         const b = findButton(uiDump(), re);
         if (b) { adb('shell', 'input', 'tap', String(b.x), String(b.y)); mark(sc, `tapped "${b.text || b.desc}"`); done = true; await sleep(4000); shot(sc); } else await sleep(3000);
       }
-      if (!done) mark(sc, 'no matching button on screen');
+      if (!done) mark(sc, 'no matching button found (if the app draws its UI on a game canvas, pass --taps ' + sc + '=x,y from a screenshot)');
     } else if (sc === 'age') {
       const nodes = uiDump();
       const q = nodes.find((n) => BUTTONS.age.test(n.text) || BUTTONS.age.test(n.desc));
@@ -186,6 +203,7 @@ export async function runScenarios(input, opts = {}) {
   // Report: the consent tap (if any) is the consent moment.
   const result = await scanFile(base, { recording: pcapFile });
   const accept = timeline.find((e) => e.event === 'consent-accept' && e.detail.startsWith('tapped'));
+  if (!fs.statSync(pcapFile).size || !fs.readFileSync(pcapFile).subarray(0, 4).equals(Buffer.from([0xd4, 0xc3, 0xb2, 0xa1])) && !fs.readFileSync(pcapFile).subarray(0, 4).equals(Buffer.from([0x0a, 0x0d, 0x0d, 0x0a]))) throw new Error(`netsim returned no capture file: ${fs.readFileSync(pcapFile, 'utf8').slice(0, 120)}`);
   const t0 = result.traffic?.start ? result.traffic.start * 1000 : null;
   const consentAt = accept && t0 ? +((Date.parse(accept.t) - t0) / 1000).toFixed(1) : null;
   const files = [base, pcapFile].map((f) => ({ name: path.basename(f), size: fs.statSync(f).size, sha256: sha256(f) }));
@@ -208,5 +226,6 @@ if (isMain) {
   runScenarios(input, {
     avd: opt('avd'), out: opt('out'), idle: Number(opt('idle', 60)), explore: Number(opt('explore', 300)),
     scenarios: opt('scenarios') ? opt('scenarios').split(',') : undefined,
+    taps: opt('taps') ? Object.fromEntries(opt('taps').split(';').map((t) => { const [k, v] = t.split('='); return [k, v.split(',').map(Number)]; })) : undefined,
   }).then((r) => console.log(`\nDone: ${r.outDir}`)).catch((e) => { console.error(`runtime: ${e.message}`); process.exit(1); });
 }
