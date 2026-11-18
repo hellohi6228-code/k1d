@@ -23,6 +23,9 @@ import { fileURLToPath } from 'node:url';
 import { openZip, bytesSource } from '../../site/js/zip.js';
 import { scanFile } from '../../cli/lib.mjs';
 import { renderReport } from '../../cli/report.mjs';
+import { analyzeFlows, parseFlows } from '../../cli/decrypt.mjs';
+import { loadKb } from '../../cli/lib.mjs';
+import { startMitm, trustCaOnDevice, setProxy, deviceIds } from './mitm.mjs';
 
 const SDK = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || path.join(os.homedir(), 'AppData', 'Local', 'Android', 'Sdk');
 const exe = (p) => (process.platform === 'win32' ? `${p}.exe` : p);
@@ -116,7 +119,7 @@ const setCapture = async (id, on) => {
 
 // ---------------------------------------------------------------- main run
 export async function runScenarios(input, opts = {}) {
-  const avd = opts.avd ?? 'k1d_Pixel';
+  const avd = opts.avd ?? (opts.decrypt ? 'k1d_Root' : 'k1d_Pixel');
   const scenarios = opts.scenarios ?? ['idle', 'consent-decline', 'age', 'consent-accept', 'explore'];
   const idle = opts.idle ?? 60;
   const explore = opts.explore ?? 300;
@@ -143,6 +146,18 @@ export async function runScenarios(input, opts = {}) {
   }
   adb('shell', 'pm', 'clear', pkg);
   mark('app data cleared', pkg);
+
+  // Decrypting mode: mitmproxy + its CA trusted by the system + emulator proxy setting.
+  let mitm = null;
+  let ids = null;
+  const flowLog = path.join(outDir, 'flows.jsonl');
+  if (opts.decrypt) {
+    if (fs.existsSync(flowLog)) fs.unlinkSync(flowLog);
+    mitm = await startMitm(flowLog);
+    const caName = trustCaOnDevice(adb, mitm.ca);
+    setProxy(adb, true);
+    mark('decryption on', `mitmproxy CA ${caName} trusted by the system; proxy 10.0.2.2:8888`);
+  }
 
   const capId = await netsimWifiCapture();
   await setCapture(capId, false);
@@ -194,6 +209,12 @@ export async function runScenarios(input, opts = {}) {
   }
   await sleep(10000);
   await setCapture(capId, false);
+  if (mitm) {
+    // Read identifiers after the run: the advertising ID only exists once an app has asked for it.
+    ids = deviceIds(adb, pkg);
+    mark('identifiers read', Object.entries(ids).filter(([, v]) => v).map(([k]) => k).join(', '));
+    setProxy(adb, false); await sleep(1000); mitm.stop();
+  }
   mark('capture stopped');
   const pcap = Buffer.from(await fetch(`${NETSIM}/v1/captures/${capId}`).then((r) => r.arrayBuffer()));
   const pcapFile = path.join(outDir, 'recording.pcap');
@@ -206,6 +227,12 @@ export async function runScenarios(input, opts = {}) {
   if (!fs.statSync(pcapFile).size || !fs.readFileSync(pcapFile).subarray(0, 4).equals(Buffer.from([0xd4, 0xc3, 0xb2, 0xa1])) && !fs.readFileSync(pcapFile).subarray(0, 4).equals(Buffer.from([0x0a, 0x0d, 0x0d, 0x0a]))) throw new Error(`netsim returned no capture file: ${fs.readFileSync(pcapFile, 'utf8').slice(0, 120)}`);
   const t0 = result.traffic?.start ? result.traffic.start * 1000 : null;
   const consentAt = accept && t0 ? +((Date.parse(accept.t) - t0) / 1000).toFixed(1) : null;
+  if (opts.decrypt && fs.existsSync(flowLog)) {
+    const launch = timeline.find((e) => e.event === 'launch');
+    result.decrypted = analyzeFlows(parseFlows(fs.readFileSync(flowLog, 'utf8')), { ids, sdkKb: loadKb().sdks, startMs: launch ? Date.parse(launch.t) : null, consentMs: accept ? Date.parse(accept.t) : null });
+    fs.writeFileSync(path.join(outDir, 'decrypted-summary.json'), `${JSON.stringify(result.decrypted, null, 1)}\n`);
+    mark('decrypted', `${result.decrypted.requests} requests to ${result.decrypted.hosts.length} hosts; ${result.decrypted.tlsFailed.length} hosts refused the proxy`);
+  }
   const files = [base, pcapFile].map((f) => ({ name: path.basename(f), size: fs.statSync(f).size, sha256: sha256(f) }));
   fs.writeFileSync(path.join(outDir, 'report.html'), renderReport(result, { files, ctx: consentAt != null ? { consentAt } : {}, timeline }));
   mark('report written', path.join(outDir, 'report.html'));
@@ -226,6 +253,7 @@ if (isMain) {
   runScenarios(input, {
     avd: opt('avd'), out: opt('out'), idle: Number(opt('idle', 60)), explore: Number(opt('explore', 300)),
     scenarios: opt('scenarios') ? opt('scenarios').split(',') : undefined,
+    decrypt: argv.includes('--decrypt'),
     taps: opt('taps') ? Object.fromEntries(opt('taps').split(';').map((t) => { const [k, v] = t.split('='); return [k, v.split(',').map(Number)]; })) : undefined,
   }).then((r) => console.log(`\nDone: ${r.outDir}`)).catch((e) => { console.error(`runtime: ${e.message}`); process.exit(1); });
 }

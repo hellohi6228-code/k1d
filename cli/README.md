@@ -92,3 +92,14 @@ node tools/runtime/run.mjs app.apks --out runs/game-2026-11-18 --idle 60 --explo
 ```
 
 Needs the Android SDK and an emulator (default AVD `k1d_Pixel`). Installs the app, clears its data, records Wi-Fi traffic through the emulator's netsim, runs: idle launch → decline consent → answer an age question with 12 → accept consent → random play (Android monkey), with a screenshot and timestamp for each step, then writes `recording.pcap`, `timeline.json`, `screens/` and `report.html`.
+
+### Decrypting HTTPS (`--decrypt`)
+
+```bash
+node tools/runtime/make-root-avd.mjs          # once: k1d_Root AVD from the Google APIs image (allows adb root)
+node tools/runtime/run.mjs app.apks --taps "consent-accept=540,1512" --decrypt
+```
+
+Needs mitmproxy (`mitmdump`) in `~/.k1d/tools/mitmproxy` (or `K1D_MITM_DIR`) and the `k1d_Root` AVD. The run starts mitmdump with `tools/runtime/k1d_flows.py`, makes the emulator's system trust mitmproxy's CA (`inject-ca.sh`, no reboot; works with Android 14+'s Conscrypt APEX store), sets the emulator's proxy, and at the end reads the identifiers the app could see (advertising ID, the app's Android ID, device model). `flows.jsonl` has every decrypted request; `decrypted-summary.json` and the report say which server received which identifier, under which field name, plain or hashed (MD5/SHA-1/SHA-256), and whether before the consent tap. Servers that refuse the proxy (certificate pinning) are listed as not inspected. Operating-system servers are marked and left out of the findings.
+
+Put `--decrypt` last on the command line.

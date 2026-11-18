@@ -85,6 +85,13 @@ ${t ? `<h2>4. Network activity during the recording · 录制期间的网络活�
 <p class="muted">Seconds are counted from the app's first connection. Operating-system hosts are omitted. Sizes are payload bytes; encrypted contents are not visible. · 秒数从应用首次联网起算；省略操作系统主机；加密内容不可见。</p>
 <table><thead><tr><th>s</th><th>Server</th><th>SDK / China-nexus</th><th>Sent</th><th>Received</th></tr></thead><tbody>${runtimeRows}</tbody></table>` : ''}
 
+${r.decrypted ? `<h3>Decrypted requests · 解密的请求</h3>
+<p class="muted">${r.decrypted.requests} HTTPS requests were decrypted on the test device. Identifiers looked for: ${esc(r.decrypted.idsChecked.join(', '))} (plain, URL-encoded and MD5/SHA-1/SHA-256 hashed). · 在测试设备上解密了 ${r.decrypted.requests} 个 HTTPS 请求。</p>
+<table><thead><tr><th>Server</th><th>SDK</th><th>Requests</th><th>Identifiers received (field)</th><th>First (s)</th></tr></thead><tbody>
+${r.decrypted.hosts.slice(0, 80).map((h) => `<tr><td><code>${esc(h.host)}</code>${h.system ? ' <span class="pill">system · 系统</span>' : ''}</td><td>${esc(h.sdk?.name.en ?? '')}</td><td>${h.requests}</td><td>${Object.entries(h.ids).map(([k, e]) => `${esc(k)}${e.hashed ? ' (hashed)' : ''}${e.fields.length ? ` <code>${esc(e.fields.slice(0, 3).join(', '))}</code>` : ''}${e.beforeConsent ? ' <span class="pill warn">before consent · 同意前</span>' : ''}`).join('<br>') || '—'}</td><td>${h.first ?? '—'}</td></tr>`).join('')}
+</tbody></table>
+${r.decrypted.tlsFailed.length ? `<p class="muted">Not inspected (the app refused the inspecting proxy, usually certificate pinning) · 未能检查（通常为证书固定）: ${esc(r.decrypted.tlsFailed.map((x) => x.host).join(', '))}</p>` : ''}` : ''}
+
 <h2>${t ? 5 : 4}. SDKs · SDK</h2>
 <table><thead><tr><th>SDK</th><th>Category</th><th>China-nexus</th><th>Evidence</th></tr></thead><tbody>
 ${r.sdks.map((s) => `<tr><td><strong>${esc(s.name.en)}</strong>${s.seenAtRuntime ? ` <span class="pill warn">${s.runtimeOnly ? 'only in recording' : 'connected in recording'}</span>` : ''}<br><span class="muted">${esc(s.vendor)}</span></td><td>${esc(s.category)}</td><td>${s.cnNexus ? `<span class="pill cn">CN</span> ${esc(typeof s.cnNexus === 'string' ? s.cnNexus : '')}` : ''}</td><td class="muted">${esc(s.evidence.slice(0, 3).map((e) => `${e.type}: ${e.signature ?? ''}`).join(' · '))}</td></tr>`).join('')}

@@ -25,6 +25,13 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
   // Combined scan (app file + recording): r.runtime is set by combine.js.
   const rt = r.runtime;
   const rep = rt?.report; // iPhone App Privacy Report entry for this app
+  // Decrypted requests (tools/runtime with --decrypt): who received which device identifier.
+  const dec = r.decrypted;
+  const ID_EN = { gaid: 'advertising ID', androidId: 'Android ID', model: 'device model' };
+  const ID_ZH = { gaid: '广告 ID', androidId: 'Android ID', model: '设备型号' };
+  // Operating-system servers (Google Play services etc.) are left out: the proxy sees the whole device.
+  const decHosts = (dec?.hosts ?? []).filter((h) => !h.system && Object.keys(h.ids).some((k) => k !== 'model'));
+  const decLine = (list, lang) => list.slice(0, 5).map((h) => `${h.sdk ? (lang === 'zh' ? h.sdk.name.zh : h.sdk.name.en) : h.host} (${Object.entries(h.ids).filter(([k]) => k !== 'model').map(([k, e]) => `${(lang === 'zh' ? ID_ZH : ID_EN)[k] ?? k}${e.hashed ? (lang === 'zh' ? '，哈希' : ', hashed') : ''}${e.fields.length ? ` "${e.fields[0]}"` : ''}`).join(lang === 'zh' ? '、' : ', ')})`).join(lang === 'zh' ? '；' : '; ');
   const firstMinute = (list) => { const st = prof.consent?.appStart; return st == null ? [] : list.filter((h) => h.relFirst != null && h.relFirst - st <= 60); };
   const cov = r.coverage;
   const quote = (h) => `“${h.text.length > 160 ? `${h.text.slice(0, 157)}…` : h.text}” (${h.source.split('!').pop()})`;
@@ -95,6 +102,8 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
       const kidsFirstMin = firstMinute(liveTracking);
       if (kidsFirstMin.length) signals.push(S(`${kidsFirstMin.length} tracking host(s) connected in the app's first 60 seconds, before any age question or consent if the recording followed the k1d guide.`, `${kidsFirstMin.length} 个跟踪主机在应用启动后 60 秒内即连接（如按 k1d 指南录制，此时尚未出现年龄询问或同意）。`));
       if (liveTracking.length) signals.push(S(`At runtime the app contacted ${liveTracking.length} tracking host(s), e.g. ${liveTracking.slice(0, 4).map((h) => h.host).join(', ')}.`, `运行时应用连接了 ${liveTracking.length} 个跟踪主机，如 ${liveTracking.slice(0, 4).map((h) => h.host).join('、')}。`));
+      const gaidTo = (dec?.hosts ?? []).filter((h) => !h.system && h.ids.gaid);
+      if (gaidTo.length) signals.push(S(`Decrypted traffic: the advertising ID (a persistent identifier) was sent to ${gaidTo.length} server(s)${gaidTo.some((h) => h.ids.gaid.beforeConsent) ? ', some before consent' : ''}: ${gaidTo.slice(0, 5).map((h) => h.sdk?.name.en ?? h.host).join(', ')}.`, `解密流量：广告 ID（持久标识符）被发送至 ${gaidTo.length} 台服务器${gaidTo.some((h) => h.ids.gaid.beforeConsent) ? '，部分在同意之前' : ''}：${gaidTo.slice(0, 5).map((h) => h.sdk?.name.zh ?? h.host).join('、')}。`));
       if (['game', 'casino'].includes(ctx.category) && r.capabilities.billing) signals.push(S('Game with in-app purchases: the FTC order against HoYoverse requires parental consent for loot-box purchases by users under 16.', '含应用内购买的游戏：FTC 对 HoYoverse 的命令要求 16 岁以下用户购买抽奖箱须经家长同意。'));
     }
     if (ui) {
@@ -155,6 +164,13 @@ export function buildRisks(r, ctxIn = {}, policy = null) {
       const extra = tracking.filter((s) => s.runtimeOnly);
       if (extra.length) signals.push(S(`Seen only in the recording, not found in the app file: ${names(extra)}.`, `仅在录制中出现、应用文件中未发现：${names(extra, 'zh')}。`));
     }
+    if (decHosts.length) {
+      const pre = decHosts.filter((h) => Object.values(h.ids).some((e) => e.beforeConsent));
+      signals.push(S(`Decrypted traffic: ${decHosts.length} server(s) received a device identifier: ${decLine(decHosts, 'en')}.`, `解密流量：${decHosts.length} 台服务器收到了设备标识符：${decLine(decHosts, 'zh')}。`));
+      if (pre.length) signals.push(S(`${pre.length} of them received it before consent was given: ${decLine(pre, 'en')}.`, `其中 ${pre.length} 台在用户同意之前即已收到：${decLine(pre, 'zh')}。`));
+    }
+    const pinned = (dec?.tlsFailed ?? []).filter((x) => !x.system);
+    if (pinned.length) signals.push(S(`${pinned.length} server(s) could not be inspected (the app refused the inspecting proxy, usually certificate pinning): ${pinned.slice(0, 5).map((x) => x.host).join(', ')}.`, `${pinned.length} 台服务器无法检查（应用拒绝了检查代理，通常是证书固定）：${pinned.slice(0, 5).map((x) => x.host).join('、')}。`));
     if (rep) {
       const flagged = rep.domains.filter((d) => d.tracker && d.appInitiated);
       if (flagged.length) signals.push(S(`Apple flagged ${flagged.length} domain(s) this app contacted as possibly collecting information across apps and websites: ${flagged.slice(0, 6).map((d) => d.domain).join(', ')}.`, `Apple 将该应用连接的 ${flagged.length} 个域名标记为可能跨应用和网站收集信息：${flagged.slice(0, 6).map((d) => d.domain).join('、')}。`));
